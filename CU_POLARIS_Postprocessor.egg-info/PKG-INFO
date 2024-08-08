@@ -1,0 +1,8 @@
+Metadata-Version: 2.1
+Name: CU_POLARIS_Postprocessor
+Version: 0.1
+Summary: A package for conducting high speed parallel processing on POLARIS output data
+Home-page: https://github.com/yourusername/my_package
+Author: Joe Paul
+Author-email: jpaul4@clemson.edu
+Requires-Dist: pandas
