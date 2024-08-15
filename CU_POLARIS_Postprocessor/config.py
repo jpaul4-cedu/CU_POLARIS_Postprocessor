@@ -20,7 +20,8 @@ class PostProcessingConfig:
                  sql_tables =None,
                  csvs=None,
                  results=None,
-                 unique_folders=None):
+                 unique_folders=None,
+                 output_h5=False):
         
         self.fresh_start = fresh_start
         self.do_closest_stops = do_closest_stops
@@ -43,7 +44,8 @@ class PostProcessingConfig:
         self.postprocessing_definitions = postprocessing_definitions if postprocessing_definitions is not None else {
             'requests_sum':("process_solo_equiv_fare", {'force_skims': self.force_skims}),
             "closest_stops":("process_nearest_stops", {}),
-            "tnc_skim_demo":("process_elder_request_agg", {})
+            "tnc_skim_demo":("process_elder_request_agg", {}),
+            "tnc_stat_summary":("process_tnc_stat_summary",{}),
         }
         
         self.desired_outputs = desired_outputs if desired_outputs is not None else {
@@ -66,8 +68,11 @@ class PostProcessingConfig:
             'requests_sum_helper':'postprocessing_helper',
             'requests_sum': 'postprocessing',
             'closest_stops':'postprocessing_helper',
+            'tnc_stat_summary_helper':'postprocessing_helper',
+            'tnc_stat_summary':'postprocessing',
             'tnc_skim_demo':'postprocessing'
         }
+        self.output_h5 = output_h5
 
     def update_config(self, **kwargs):
         for key, value in kwargs.items():

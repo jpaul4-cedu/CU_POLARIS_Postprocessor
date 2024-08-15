@@ -1,0 +1,40 @@
+{
+	"Telecommute_Choice_Model" :
+	{
+		"__comment" : "Zero-inflation paramaters",
+		"Z_CONSTANT" 				: -0.98,
+		"Z_MALE" 					: 0.26,
+		"Z_INCOME_LOW" 				: -0.64,
+		"Z_EDUC_NO_COLLEGE" 		: -0.67,
+		"Z_WORK_TRIP_DIST" 			: 0.22,
+		"Z_NWORKERS" 				: 0.18,
+		"Z_FLEX_WORK_INDICATOR"		: 0.89,
+		"Z_OCC_TRANS_UTILITY" 		: -0.24,
+		"Z_OCC_MANAGEMENT" 			: -0.61,
+		"Z_OCC_SERVICE" 			: -0.38,
+		"Z_EMP_DENSITY_OVER_20000" 	: 0.34,
+		"Z_POP_DENSITY" 			: -0.07,
+
+		"__comment" : "Ordered probit model",
+		"O_CONSTANT" 				: -0.62,
+		"O_INCOME_MED" 				: 0.49,
+		"O_AGE_35_55" 				: 0.2,
+		"O_EDUC_GRAD_DEGREE" 		: 0.31,
+		"O_WORK_TRIP_TTIME" 		: 0.23,
+		"O_NVEHICLE" 				: 0.14,
+		"O_FLEX_WORK_INDICATOR" 	: 0.82,
+		"O_OCC_GOVERNMENT" 			: -0.23,
+		"O_OCC_COMMUNICATION" 		: 0.31,
+		"O_OCC_MANUFACTURING" 		: -0.16,
+		"O_EMP_DENSITY_UNDER_3000"	: -0.22,
+
+		"__comment" : "threshold variables",
+		"T_WORK_DURATION" 			: -0.03,
+		"T_VEH_AVAILABLE" 			: -0.11,
+		"T_HH_VEH_OVER_2_INDICATOR" : 0.26,
+		"T_C1" 						: -1.6,
+		"T_C2" 						: -0.47,
+		"T_C3" 						: 0.43,
+		"T_RHO" 					: 0.28
+	}
+}

@@ -1,4 +1,4 @@
-import concurrent
+import concurrent.futures
 from pathlib import Path
 import os
 from .utils import get_highest_iteration_folder, get_scale_factor
@@ -9,7 +9,8 @@ import sqlite3
 from .config import PostProcessingConfig
 import pandas as pd
 import itertools
-from .postprocessing import process_batch_nearest_stops, process_elder_request_agg, process_nearest_stops, process_solo_equiv_fare
+import json
+from .postprocessing import process_batch_nearest_stops, process_elder_request_agg, process_nearest_stops, process_solo_equiv_fare, process_tnc_stat_summary
 
 def parallel_process_folders(config:PostProcessingConfig):
     # Get a list of all subfolders in the parent folder
@@ -33,6 +34,10 @@ def parallel_process_folders(config:PostProcessingConfig):
         df.to_csv(parent_folder.as_posix() +'/' + key + '.csv', index=False)
     final_results.update(config.results)
     config.update_config(results=final_results)
+    if config.output_h5:
+        with pd.HDFStore(config.base_dir.as_posix()+'/results.h5') as store:
+            for key, df in final_results.items():
+                store[key] = df
     return True
 
 def process_folder(dir, config:PostProcessingConfig):

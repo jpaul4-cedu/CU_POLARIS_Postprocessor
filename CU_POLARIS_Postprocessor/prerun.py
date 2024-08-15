@@ -11,6 +11,8 @@ import pandas as pd
 
 def pre_run_checks(config:PostProcessingConfig):
     # Validate there is a sql query for each sql based table we want
+    path = config.base_dir.resolve()
+    config.update_config(base_dir=path)
     cats = separate_keys_by_value(config.desired_outputs)
     sql_cats = cats['sql']
 
