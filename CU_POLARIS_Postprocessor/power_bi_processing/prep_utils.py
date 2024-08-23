@@ -34,24 +34,28 @@ def process_tnc_ttests(config:PostProcessingConfig, base_cases):
     base_df = df[df['folder'].isin(base_cases)]
     results =pd.DataFrame()
 
-    metrics = ['wait_min', 'ttime', 'discount', 'fare', 'pooled', 'eVMT',
-                'occupied_VMT', 'VMT', 'mileage_AVO', 'mileage_rAVO',
-                'trip_AVO', 'trip_rAVO', 'operating_cost', 'revenue']
+    avg_metrics_t= ['eVMT_perc','wait_min', 'ttime',  'pooled', 'mileage_AVO', 'mileage_rAVO',
+                'trip_AVO', 'trip_rAVO']
+    
+    sum_metrics_t = ['occupied_VMT', 'VMT', 'discount', 'fare', 'operating_cost', 'revenue']
+    sum_metrics = ['assigned_requests','requests']
     i=0
     for city in df['city'].unique():
         city_df = df[df['city'] == city]
         base_city_df = base_df[base_df['city'] == city]
         for folder in city_df['folder'].unique():
             if folder not in base_city_df['folder']:
-                for metric in metrics:
+                for metric in avg_metrics_t:
                     # Extract stats for both cases
                     mean1 = base_city_df.loc[base_city_df['Metric']==metric,'Mean'].values[0]
                     std1 = base_city_df.loc[base_city_df['Metric']==metric,'StdDev'].values[0]
                     n1 = base_city_df.loc[base_city_df['Metric']==metric,'SampleSize'].values[0]
+                    #count = base_city_df.loc[base_city_df['Metric']==metric,'Sum'].values[0]
 
                     mean2 = city_df.loc[(city_df['Metric'] == metric) & (city_df['folder'] == folder), 'Mean'].values[0]
                     std2 = city_df.loc[(city_df['Metric'] == metric) & (city_df['folder'] == folder), 'StdDev'].values[0]
                     n2 = city_df.loc[(city_df['Metric'] == metric) & (city_df['folder'] == folder), 'SampleSize'].values[0]
+                    #count2 = city_df.loc[(city_df['Metric'] == metric) & (city_df['folder'] == folder), 'Sum'].values[0]
 
                     # Perform t-test
                     t_stat, p_val = ttest_ind_from_stats(mean1, std1, n1, mean2, std2, n2)
@@ -61,11 +65,43 @@ def process_tnc_ttests(config:PostProcessingConfig, base_cases):
                     'folder': folder,
                     'metric': metric,
                     't-statistic': t_stat,
-                    'p-value': p_val},index=[i])
-                #print(new_row)
-                # Store results
+                    'p-value': p_val, 'value': mean2},index=[i])
                     i=i+1
                     results = pd.concat([results,new_row],ignore_index=True)
+                for metric in sum_metrics_t:
+                    # Extract stats for both cases
+                    mean1 = base_city_df.loc[base_city_df['Metric']==metric,'Mean'].values[0]
+                    std1 = base_city_df.loc[base_city_df['Metric']==metric,'StdDev'].values[0]
+                    n1 = base_city_df.loc[base_city_df['Metric']==metric,'SampleSize'].values[0]
+                    #count = base_city_df.loc[base_city_df['Metric']==metric,'Sum'].values[0]
+
+                    mean2 = city_df.loc[(city_df['Metric'] == metric) & (city_df['folder'] == folder), 'Mean'].values[0]
+                    std2 = city_df.loc[(city_df['Metric'] == metric) & (city_df['folder'] == folder), 'StdDev'].values[0]
+                    n2 = city_df.loc[(city_df['Metric'] == metric) & (city_df['folder'] == folder), 'SampleSize'].values[0]
+                    sum = city_df.loc[(city_df['Metric'] == metric) & (city_df['folder'] == folder), 'Sum'].values[0]
+
+                    # Perform t-test
+                    t_stat, p_val = ttest_ind_from_stats(mean1, std1, n1, mean2, std2, n2)
+                    new_row = pd.DataFrame({
+                    'city': city,
+                    'base_case': base_city_df['folder'].unique()[0],
+                    'folder': folder,
+                    'metric': metric,
+                    't-statistic': t_stat,
+                    'p-value': p_val, 'value': sum},index=[i])
+                    i=i+1
+                    results = pd.concat([results,new_row],ignore_index=True)
+                for metric in sum_metrics:
+                    count = city_df.loc[(city_df['Metric'] == metric) & (city_df['folder'] == folder), 'Sum'].values[0]
+                    new_row = pd.DataFrame({
+                    'city': city,
+                    'base_case': base_city_df['folder'].unique()[0],
+                    'folder': folder,
+                    'metric': metric,
+                    'value': count},index=[i])
+                    i=i+1
+                    results = pd.concat([results,new_row],ignore_index=True)
+
     results.to_csv(config.base_dir.as_posix() + '/tnc_ttests.csv')
     result_hold = config.results
     result_hold['tnc_ttests']=results

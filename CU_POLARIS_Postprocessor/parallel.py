@@ -74,6 +74,7 @@ def process_folder(dir, config:PostProcessingConfig):
 
     queries = get_sql_create(supply_db=dir.as_posix() + '/'+ supply_db,trip_multiplier=trip_multiplier,result_db=dir.as_posix() + '/'+result_db)
     queries_to_run =[queries[key] for key in config.sql_tables if key in queries]
+    #print(queries_to_run)
     dir_name = os.path.split(os.path.split(dir.absolute())[0])[1]
     
     index_script_supply = """CREATE INDEX IF NOT EXISTS idx_supply_location_location ON location(location);

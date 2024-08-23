@@ -49,7 +49,7 @@ class PostProcessingConfig:
         }
         
         self.desired_outputs = desired_outputs if desired_outputs is not None else {
-            'transit_trip_max_load_helper':'sql_helper',
+            'transit_trip_max_load_helper':'sql',
             'attach':'sql_helper',         
             'transit_trip_max_load':'sql',
             'mode_Distribution_ADULT_Counts':'sql',
@@ -70,7 +70,8 @@ class PostProcessingConfig:
             'closest_stops':'postprocessing_helper',
             'tnc_stat_summary_helper':'postprocessing_helper',
             'tnc_stat_summary':'postprocessing',
-            'tnc_skim_demo':'postprocessing'
+            'tnc_skim_demo':'postprocessing',
+            'tnc_stat_summary_helper':'sql_helper'
         }
         self.output_h5 = output_h5
 

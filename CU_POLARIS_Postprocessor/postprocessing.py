@@ -1,9 +1,11 @@
 import os
 import sqlite3
 import pandas as pd
+import numpy as np
 from .utils import get_timeperiods, get_tnc_pricing, get_heur_discount
 import openmatrix as omx
 from CU_POLARIS_Postprocessor.config import PostProcessingConfig
+from CU_POLARIS_Postprocessor.utils import get_scale_factor
 
 def process_nearest_stops(iter_dir, folder, **kwargs):
     from sklearn.neighbors import BallTree
@@ -263,76 +265,23 @@ def process_elder_request_agg(iter_dir, trip_multiplier, supply_db, result_db, d
             t_case_demo_df.to_csv(dir.as_posix() + '/'+'tnc_skim_demo.csv', index=False)
         return t_case_demo_df
 
-def process_tnc_stat_summary(iter_dir, demand_db,folder, **kwargs):
-    query = f"""create table if not exists tnc_stat_summary_helper as 
-        select 
-        assigned_vehicle,
-        tnc_request_id,
-        (pickup_time-request_time)/60 as wait_min, 
-        (dropoff_time-pickup_time)/60 as ttime, 
-        discount, 
-        fare,
-        case when (max_pass - party_size) > 0 then 1 else 0 end as pooled,
-        eVMT,
-        occupied_VMT,
-        VMT,
-        passengers,
-        trips,
-        mileage_AVO,
-        mileage_rAVO,
-        trip_AVO,
-        trip_rAVO,
-        pooled_service,
-        operating_cost,
-        fare-discount-operating_cost as revenue
-
-        from tnc_request a left join 
-        (select request,
-        eVMT,
-        occupied_VMT,
-        VMT,
-        VMT*0.50 as operating_cost,
-        passengers,
-        trips,
-        passengers*1.0/VMT as mileage_AVO,
-        passengers*1.0/occupied_VMT as mileage_rAVO,
-        passengers*1.0/trips as trip_AVO,
-        passengers*1.0 as trip_rAVO,
-        max_pass
-        from
-        (SELECT
-            request,
-            SUM(CASE WHEN trip_avo = 0 THEN travel_distance ELSE 0 END) AS eVMT,
-            SUM(CASE WHEN trip_avo > 0 THEN travel_distance ELSE 0 END) AS occupied_VMT,
-            SUM(travel_distance) as VMT,
-            SUM(trip_avo) as passengers,
-            COUNT(TNC_Trip_id_int) as trips,
-            MAX(trip_avo) as max_pass
-        FROM (
-            SELECT 
-                tnc_trip_id_int, 
-                request, 
-                passengers*1.0/travel_distance AS mileage_avo, 
-                passengers AS trip_avo, 
-                travel_distance/1609.34 as travel_distance
-            FROM tnc_trip
-        ) AS subquery
-        GROUP BY request
-        ORDER BY request)) b
-
-        on a.tnc_request_id= b.request;"""
+def process_tnc_stat_summary(iter_dir, demand_db,folder, config:PostProcessingConfig, **kwargs):
     
     with  sqlite3.connect(iter_dir.as_posix()+ '/'+demand_db) as conn:
-        conn.executescript(query)
         df = pd.read_sql("select * from tnc_stat_summary_helper",conn)
-    served_requests = df.dropna(subset=['assigned_vehicle'])
+    #served_requests = df.dropna(subset=['assigned_vehicle'])
+    df['assigned_vehicle'] = df['assigned_vehicle'].apply(lambda x: 0 if pd.isna(x) else 1)
+    scale_factor = get_scale_factor(iter_dir,config)
+    assigned_vehicles = df['assigned_vehicle'].sum()*scale_factor
+    requests = df['assigned_vehicle'].count()*scale_factor
+    df = df.drop(df[df['assigned_vehicle']==0].index)
     columns_to_sum = [
         'wait_min',
         'ttime',
         'discount',
         'fare',
         'pooled',
-        'eVMT',
+        'eVMT_perc',
         'occupied_VMT',
         'VMT',
         'mileage_AVO',
@@ -342,11 +291,13 @@ def process_tnc_stat_summary(iter_dir, demand_db,folder, **kwargs):
         'operating_cost',
         'revenue'
         ]
-    summary_df = served_requests[columns_to_sum].agg(['mean', 'std', 'count']).transpose().reset_index()
-
-# Rename columns for clarity
-    summary_df.columns = ['Metric','Mean', 'StdDev', 'SampleSize']
-    summary_df = summary_df.assign(folder=folder)
+    summary_df = df[columns_to_sum].agg(['sum','mean', 'std', 'count']).transpose().reset_index()
+    summary_df= pd.concat([summary_df,pd.DataFrame({'index': 'assigned_requests','sum':assigned_vehicles},index=[0])])
+    summary_df= pd.concat([summary_df,pd.DataFrame({'index': 'requests','sum':requests},index=[0])])
+    # Rename columns for clarity
+    summary_df.columns = ['Metric', 'Sum', 'Mean', 'StdDev', 'SampleSize']
+    summary_df = summary_df.assign(folder=folder).reset_index()
+    summary_df=summary_df.drop(columns=['index'])
     summary_df.to_csv(iter_dir.as_posix() + '/tnc_stat_summary_helper.csv')
     return summary_df
 

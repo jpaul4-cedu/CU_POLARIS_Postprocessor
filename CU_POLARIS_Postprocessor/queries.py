@@ -220,6 +220,63 @@ def get_sql_create(supply_db,trip_multiplier,result_db):
         LEFT JOIN household d ON c.household = d.household
         LEFT JOIN location e ON d.location = e.location
         where a.has_artificial_trip = 0
-        GROUP BY e.zone, b.mode, b.type, age_class;"""
+        GROUP BY e.zone, b.mode, b.type, age_class;""",
+        "tnc_stat_summary_helper":f"""create table if not exists tnc_stat_summary_helper as 
+        select 
+        assigned_vehicle,
+        tnc_request_id,
+        (pickup_time-request_time)/60 as wait_min, 
+        (dropoff_time-pickup_time)/60 as ttime, 
+        discount*{trip_multiplier} as discount, 
+        fare*{trip_multiplier} as fare,
+        case when (max_pass - party_size) > 0 then 1 else 0 end as pooled,
+        eVMT_perc,
+        occupied_VMT*{trip_multiplier} as occupied_VMT,
+        VMT*{trip_multiplier} as VMT,
+        passengers,
+        trips*{trip_multiplier} as trips,
+        mileage_AVO,
+        mileage_rAVO,
+        trip_AVO,
+        trip_rAVO,
+        pooled_service,
+        operating_cost*{trip_multiplier} as operating_cost,
+        (fare-discount-operating_cost)*{trip_multiplier} as revenue
+
+        from tnc_request a left join 
+        (select request,
+        eVMT*1.0/VMT*1.0 as eVMT_perc,
+        occupied_VMT,
+        VMT,
+        VMT*0.50 as operating_cost,
+        passengers,
+        trips,
+        passengers*1.0/VMT as mileage_AVO,
+        passengers*1.0/occupied_VMT as mileage_rAVO,
+        passengers*1.0/trips as trip_AVO,
+        passengers*1.0 as trip_rAVO,
+        max_pass
+        from
+        (SELECT
+            request,
+            SUM(CASE WHEN trip_avo = 0 THEN travel_distance ELSE 0 END) AS eVMT,
+            SUM(CASE WHEN trip_avo > 0 THEN travel_distance ELSE 0 END) AS occupied_VMT,
+            SUM(travel_distance) as VMT,
+            SUM(trip_avo) as passengers,
+            COUNT(TNC_Trip_id_int) as trips,
+            MAX(trip_avo) as max_pass
+        FROM (
+            SELECT 
+                tnc_trip_id_int, 
+                request, 
+                passengers*1.0/travel_distance AS mileage_avo, 
+                passengers AS trip_avo, 
+                travel_distance/1609.34 as travel_distance
+            FROM tnc_trip
+        ) AS subquery
+        GROUP BY request
+        ORDER BY request)) b
+
+        on a.tnc_request_id= b.request;"""
     }
     return queries
