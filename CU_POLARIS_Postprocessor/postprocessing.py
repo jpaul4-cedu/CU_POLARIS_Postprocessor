@@ -8,6 +8,7 @@ from CU_POLARIS_Postprocessor.config import PostProcessingConfig
 from CU_POLARIS_Postprocessor.utils import get_scale_factor
 
 def process_nearest_stops(iter_dir, folder, **kwargs):
+    dir = iter_dir
     from sklearn.neighbors import BallTree
     from joblib import Parallel, delayed
     print(f"Starting stop processing for {dir}.")
@@ -29,21 +30,17 @@ def process_nearest_stops(iter_dir, folder, **kwargs):
     with sqlite3.connect(dir.as_posix() +'/'+ city+'-Demand.sqlite') as conn:
         conn.cursor().executescript(supply_path);
          # Load households and bus stops data into DataFrames
-        global households_df
         households_df = pd.read_sql_query(read_house_sql, conn)
-        global bus_stops_df
         bus_stops_df = pd.read_sql_query(read_bus_sql, conn)
     bus_stops_coords = bus_stops_df[['X','Y']].values
-    global households_coords
     households_coords = households_df[['x','y']].values
-    global tree
     tree = BallTree(bus_stops_coords, leaf_size=40)
 
     batch_size = 1000
     n_jobs = -1  # Use all available CPU cores
 
     # Create list of tasks
-    tasks = [(start, min(start + batch_size, len(households_coords))) for start in range(0, len(households_coords), batch_size)]
+    tasks = [(start, min(start + batch_size, len(households_coords)),households_coords,tree, households_df, bus_stops_df) for start in range(0, len(households_coords), batch_size)]
 
     # Print tasks for debugging
     #print("Tasks:", tasks)
@@ -70,11 +67,11 @@ def process_nearest_stops(iter_dir, folder, **kwargs):
 
     dir_name = os.path.split(os.path.split(dir.absolute())[0])[1]
     results_df_sum=results_df_sum.assign(folder=folder)
-    results_df_sum.to_csv(dir.as_posix() + '/closest_stops.csv', index=False)
+    results_df_sum.to_csv(dir.as_posix() + '/closest_stops_helper.csv', index=False)
     print(f'Finished stop processing for {dir}.')
     return results_df_sum
 
-def process_batch_nearest_stops(start_idx, end_idx, **kwargs):
+def process_batch_nearest_stops(start_idx, end_idx, households_coords, tree, households_df, bus_stops_df **kwargs):
     #print(f"Processing batch {start_idx} to {end_idx}")
     batch_coords = households_coords[start_idx:end_idx]
     distances, indices = tree.query(batch_coords, k=1)
