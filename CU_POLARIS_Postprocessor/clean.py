@@ -8,6 +8,9 @@ from CU_POLARIS_Postprocessor.config import PostProcessingConfig
 
 
 def clean_analysis(config:PostProcessingConfig):
+    '''Clean analysis loops through all of the case folders 
+    in an output dataset and removes the desired existing analysis CSVs, 
+    SQL Tables, and any other supporting files to provide a fresh start for analysis.'''
     run_dirs = [Path(d) for d in glob.glob(config.base_dir.as_posix() + "/*/")]
     for dir in run_dirs:
         dir = get_highest_iteration_folder(dir)

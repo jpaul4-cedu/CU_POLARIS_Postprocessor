@@ -6,6 +6,7 @@ from .utils import get_timeperiods, get_tnc_pricing, get_heur_discount
 import openmatrix as omx
 from CU_POLARIS_Postprocessor.config import PostProcessingConfig
 from CU_POLARIS_Postprocessor.utils import get_scale_factor
+from functools import partial
 
 def process_nearest_stops(iter_dir, folder, **kwargs):
     dir = iter_dir
@@ -40,14 +41,16 @@ def process_nearest_stops(iter_dir, folder, **kwargs):
     n_jobs = -1  # Use all available CPU cores
 
     # Create list of tasks
-    tasks = [(start, min(start + batch_size, len(households_coords)),households_coords,tree, households_df, bus_stops_df) for start in range(0, len(households_coords), batch_size)]
+    tasks = [(start, min(start + batch_size, len(households_coords))) for start in range(0, len(households_coords), batch_size)]
 
     # Print tasks for debugging
-    #print("Tasks:", tasks)
+    print("Tasks:", tasks)
+   
+    p_process_batch_nearest_stops = partial(process_batch_nearest_stops,households_coords=households_coords, tree=tree, households_df=households_df, bus_stops_df=bus_stops_df)
 
     # Process tasks in parallel
-    results = Parallel(n_jobs=n_jobs)(delayed(process_batch_nearest_stops)(start, end) for start, end in tasks)
-
+    results = Parallel(n_jobs=n_jobs)(delayed(p_process_batch_nearest_stops)(start, end) for start, end in tasks)
+   
     # Flatten the list of results
     flat_results = [item for sublist in results for item in sublist]
 
@@ -71,7 +74,7 @@ def process_nearest_stops(iter_dir, folder, **kwargs):
     print(f'Finished stop processing for {dir}.')
     return results_df_sum
 
-def process_batch_nearest_stops(start_idx, end_idx, households_coords, tree, households_df, bus_stops_df **kwargs):
+def process_batch_nearest_stops(start_idx, end_idx, households_coords, tree, households_df, bus_stops_df, **kwargs):
     #print(f"Processing batch {start_idx} to {end_idx}")
     batch_coords = households_coords[start_idx:end_idx]
     distances, indices = tree.query(batch_coords, k=1)
