@@ -44,7 +44,7 @@ def process_nearest_stops(iter_dir, folder, **kwargs):
     tasks = [(start, min(start + batch_size, len(households_coords))) for start in range(0, len(households_coords), batch_size)]
 
     # Print tasks for debugging
-    print("Tasks:", tasks)
+    #print("Tasks:", tasks)
    
     p_process_batch_nearest_stops = partial(process_batch_nearest_stops,households_coords=households_coords, tree=tree, households_df=households_df, bus_stops_df=bus_stops_df)
 

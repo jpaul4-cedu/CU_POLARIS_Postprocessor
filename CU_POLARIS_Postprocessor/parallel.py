@@ -129,7 +129,7 @@ def process_folder(dir, config:PostProcessingConfig):
                         func_args['trip_multiplier']=trip_multiplier
                         func_args['config']=config
                         # Call the function by name using globals()
-                        print(f"Processing {filename} with {func_name} and arguments {func_args}")
+                        print(f"Processing {filename} with {func_name} for {folder}.")
                         if func_name in globals():
                             df  = globals()[func_name](**func_args)
                             results[key]=df

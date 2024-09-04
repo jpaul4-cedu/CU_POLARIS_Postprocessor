@@ -2,6 +2,12 @@
 
 This package adds a parallel processing architecture for processing outputs from POLARIS (https://www.anl.gov/taps/polaris-transportation-system-simulation-tool).
 
+
+## Setup
+Use the environment.yml file to build a conda environment on the target system. This will install all necessary dependencies.
+
+Open the folder containing the CU_POLARIS_Postprocessor with VS Code to use directly.
+
 ## Examples
 Please see the jupyter notebook for example usage. The config object holds all the information required by the package to process a folder of POLARIS outputs.
 
@@ -37,6 +43,9 @@ csvs <dict>: dict of each output csv requested, its type from desired_outputs, a
 unique_folders <list>: list of case folders contained in results. If new result files are added when summary CSVs already exist, the user will be prompted to remove them so that the processing can be rerun. Any intermediate sql tables and csvs are retained so they need not be rerun.
 
 results <dict>: dict of output name (from desired_outputs) and generated result dataframes. Can be called to obtain results from postprocessing, or the output CSVS can just be used. 
+
+## Power BI Prep
+Use these functions to prepare the data for use in Power BI. These functions execute postprocessing **accross multiple output case folders** rather than within single output case folders such as in the postprocessing functions.
 
 ## Author
 
