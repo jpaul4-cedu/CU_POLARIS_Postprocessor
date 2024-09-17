@@ -72,7 +72,8 @@ class PostProcessingConfig:
             'tnc_stat_summary_helper':'postprocessing_helper',
             'tnc_stat_summary':'postprocessing',
             'tnc_skim_demo':'postprocessing',
-            'tnc_stat_summary_helper':'sql_helper'
+            'tnc_stat_summary_helper':'sql_helper',
+            'activity_times': 'sql'
         }
         self.output_h5 = output_h5
 
