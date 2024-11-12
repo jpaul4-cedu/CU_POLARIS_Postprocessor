@@ -277,6 +277,14 @@ def get_sql_create(supply_db,trip_multiplier,result_db):
         GROUP BY request
         ORDER BY request)) b
 
-        on a.tnc_request_id= b.request;"""
+        on a.tnc_request_id= b.request;""",
+
+    "activity_times": f"""create table if not exists activity_times as
+    select sum(a.duration) as activity_duration, a.type as activity_type, case when b.age > 60 then 2 when b.age>18 then 1 else 0 end as age_class, c.zone 
+        from activity a 
+        left join person b on a.person = b.person 
+        left join household d on b.household = d.household
+        left join location c on d.location = c.location
+        where mode = 'NO_MOVE' group by a.type, age_class, zone;"""
     }
     return queries

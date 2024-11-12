@@ -6,6 +6,10 @@ import pandas as pd
 import json
 import openmatrix as omx
 from CU_POLARIS_Postprocessor.config import PostProcessingConfig
+import shutil
+import warnings
+import subprocess
+from concurrent import futures
 
 
 def fxn():
@@ -162,3 +166,141 @@ def check_value_in_list(value, lst, delimiter="_"):
         raise ValueError(f"Value '{value}' not found in the list after splitting by the last '{delimiter}'")
     return True
 
+def bulk_update_scenario_files(path:list, val, folder_path:Path = os.getcwd(), scenario_names: list = ['scenario_abm.json']):
+    for folder in os.listdir(folder_path):
+        full_path = os.path.join(folder_path,folder)
+        if os.path.exists(full_path):
+            for scen_file in scenario_names:
+                scenario_file = os.path.join(full_path,scen_file)
+                if os.path.exists(scenario_file):
+                    shutil.copy(scenario_file,os.path.join(full_path,os.path.splitext(os.path.basename(scenario_file))[0]+'_backup.json'))
+                    with open(scenario_file, 'r') as file:
+                        scenario = json.load(file)
+                    
+                    current = scenario
+                    for key in path[:-1]:
+                        current = current[key]
+                    current[path[-1]] = val
+                    #['Operator_1']['Fleet_Base']['Operator_1_TNC_MAX_WAIT_TIME']
+
+                    with open(scenario_file, 'w') as file:
+                        json.dump(scenario,file,indent=4)
+                    
+                else:
+                    warnings.warn(f"Scenario file {scen_file} not found in {full_path}.")
+        else:
+            warnings.warn("This folder somehow does not exist despit you looking it up by name... weird.")
+
+def call_ps_action(action):
+    try:
+        process= subprocess.Popen(action,shell=True)
+        stdout, stderr = process.communicate(timeout=600)
+    except subprocess.TimeoutExpired:
+        print("Process timed out")
+        process.kill()  # Kill the process if it times out
+        stdout, stderr = process.communicate()  # Clean up
+    except Exception as e:
+        print(f"An error occurred: {e}")
+    finally:
+        if process.poll() is None:  # Check if process is still running
+            process.kill()  # Ensure it’s terminated
+
+def check_city_prefix(path):
+    if len(os.path.basename(path).split('_')[0]) ==3:
+        return os.path.basename(path).split('_')[0]
+    else:
+        return None
+
+
+def copy_cases(new_case_path, case_path = '', copy_cases: bool = True, new_cases:list = [], keep_files: list = [], keep_suffixes:list = [], parallel: bool = False, check_city: bool = False):
+    tasks = []
+    del_tasks = []
+    if check_city and check_city_prefix(new_case_path):
+        city = check_city_prefix(new_case_path)
+        
+        
+
+    if copy_cases: #just completely copy a set of cases from one place to another
+        folds = os.listdir(case_path)
+        if not os.path.isdir(new_case_path):
+            os.makedirs(new_case_path)
+        for fold in folds:
+            full_path = os.path.join(case_path,fold)
+            if os.path.isfile(full_path):
+                pass
+            elif os.path.isdir(full_path):
+                fold_suffix = fold.split('_')[-1]
+                if fold_suffix in keep_suffixes:
+                    if parallel:
+                        task = [new_case_path,full_path]
+                        tasks.append(task)
+                    else:
+                        copy_to_new_fold(new_case_path,full_path)
+
+        if parallel:
+            # Set max_workers to the number of cores on the machine
+            max_workers = os.cpu_count()
+            with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                executor.map(lambda task: copy_to_new_fold(*task), tasks)
+
+    elif new_cases == [] and (not os.path.isdir(new_case_path) or len(os.listdir(new_case_path))== 0):
+        warnings.warn("I don't know what cases I am supposed to copy or there is nothing here for me to update.")
+    elif new_cases != []: #take a single base folder and expand it into a bunch of cases
+        warnings.warn("Haven't completed this utility yet.")
+    elif keep_files != [] and case_path !='': #copy some files from a primary source folder but keep some of the case files
+        if os.path.isdir(new_case_path):
+            all_exist = True
+            for fold in os.listdir(new_case_path):
+                fold_path = os.path.join(new_case_path, fold)
+                if os.path.isfile(fold_path):
+                    pass
+                elif os.path.isdir(fold_path):
+                    
+                    for file_name in keep_files:
+                        if file_name not in os.listdir(fold_path):
+                            all_exist = False
+            if not all_exist:
+                raise FileNotFoundError(f"The files you requested to not update ({keep_files}) do not exist in all the folders you are attempting to update in {new_case_path}, therefore, I have stopped the process.")
+            else:
+                for fold in os.listdir(new_case_path):
+                    fold_path = os.path.join(new_case_path, fold)
+                    if os.path.isfile(fold_path):
+                        pass
+                    elif os.path.isdir(fold_path):
+                        for file_name in os.listdir(fold_path):
+                            if file_name not in keep_files:
+                                file_path = os.path.join(fold_path,file_name)
+                                action = ['del',file_path]
+                                if parallel:
+                                    del_tasks.append(action)
+                                
+                        for file_name in os.listdir(case_path):
+                            if file_name not in keep_files:
+                                file_path = os.path.join(case_path,file_name)
+                                action = ['copy',file_path,fold_path]
+                                if parallel:
+                                    tasks.append(action)
+                if parallel:
+                    # Set max_workers to the number of cores on the machine
+                    max_workers = os.cpu_count()
+                    with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                        executor.map(lambda task: call_ps_action(*task), del_tasks)
+                    with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                        executor.map(lambda task: call_ps_action(*task), tasks)  
+
+        else:
+            raise FileNotFoundError(f"Nothing in your requested case path {new_case_path}.")
+    else:
+        raise NotImplementedError("This combination of arguments is not handled.")
+
+def copy_to_new_fold(new_case_path, old_folder_path):
+    old_folder_name = os.path.basename(old_folder_path)
+    new_fold = os.path.join(new_case_path,old_folder_name)
+    if not os.path.isdir(new_fold):
+        os.makedirs(new_fold)
+    for item in os.listdir(old_folder_path):
+        sub_path = os.path.join(old_folder_path,item)
+        if os.path.isfile(sub_path) and not os.path.isfile(os.path.join(new_fold,item)):
+            action = ['copy',sub_path,os.path.join(new_fold,item)]
+            call_ps_action(action)
+            
