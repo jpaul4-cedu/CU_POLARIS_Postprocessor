@@ -173,9 +173,7 @@ def update_h5(config:PostProcessingConfig):
     return True
 
 def generate_pbix_control_csv(config:PostProcessingConfig,demo_aggregators:list, case_aggregators:list, folder_to_columns:list):
-    df =pd.DataFrame()
-    df = zip_longest(case_aggregators,folder_to_columns,demo_aggregators)
-    df =df.rename(columns={"Transit Aggregators","Folder to Columns", "Demographic Aggregators"})
+    df = pd.DataFrame(zip_longest(case_aggregators, folder_to_columns, demo_aggregators), columns=["Case Aggregators", "Folder to Columns", "Demographic Aggregators"])
     df.to_csv(config.base_dir.as_posix() + "/pbix_aggregators.csv")
     result_hold = config.results
     result_hold['pbix_aggregators']=df

@@ -50,6 +50,10 @@ def process_folder(dir, config:PostProcessingConfig):
         if os.path.exists(Path(dir.as_posix() + '/' + name+'-Supply.sqlite')):
             db_name = name
             break
+        elif os.path.exists(Path(dir.as_posix() + '/' + name+'-Supply.sqlite.tar.gz')):
+            db_name = name
+            break
+    
     
     demand_db = db_name + "-Demand.sqlite"
     #result_db = f"{db_name}-Result.sqlite"
