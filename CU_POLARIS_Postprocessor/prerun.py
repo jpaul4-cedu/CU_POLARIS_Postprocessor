@@ -59,8 +59,11 @@ def pre_run_checks(config:PostProcessingConfig):
             for item in items:
                 for dir in run_dirs:
                     iter_dir = get_highest_iteration_folder(dir)
-                    csv_path = Path(iter_dir.as_posix() + '/' + item + '.csv')
-                    dir_name = os.path.split(os.path.split(iter_dir.absolute())[0])[1]
+                    try:
+                        csv_path = Path(iter_dir.as_posix() + '/' + item + '.csv')
+                        dir_name = os.path.split(os.path.split(iter_dir.absolute())[0])[1]
+                    except:
+                        raise FileNotFoundError(f"The folder, {dir}, does not appear to have the correct iteration folder. Please remove any non-case folders from the analysis directory.")
                     helper_item = item+'_'+dir_name
                     if helper_item not in output_csvs_exists:
                         output_csvs_exists[helper_item] = {}

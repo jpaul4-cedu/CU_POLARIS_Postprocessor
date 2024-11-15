@@ -10,13 +10,34 @@ import shutil
 import warnings
 import subprocess
 from concurrent import futures
+import platform
+import itertools
+from typing import Union
 
+class CaseVariableData:
+    def __init__(self, variable_name:str, scenario_file:str, json_target:list, values:list, value_key:dict = None):
+        self.var_name = variable_name
+        self.scenario_file = scenario_file
+        self.json_target = json_target
+        self.values = values
+        self.value_key = value_key
+
+class BulkUpdateData:
+    def __init__(self, possible_scenario_names:list, value, target:list):
+        self.scenario_name = possible_scenario_names
+        self.value = value
+        self.target = target
+
+def get_platform_info():
+    system = platform.system()
+    return system
 
 def fxn():
-    warnings.warn("deprecated", DeprecationWarning)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        warnings.warn("deprecated", DeprecationWarning)
 
-with warnings.catch_warnings(action="ignore"):
-    fxn()
+fxn()
 
 def get_highest_iteration_folder(base_folder):
     pattern = re.compile(r'^(.*)_iteration_(\d+)$')
@@ -166,32 +187,71 @@ def check_value_in_list(value, lst, delimiter="_"):
         raise ValueError(f"Value '{value}' not found in the list after splitting by the last '{delimiter}'")
     return True
 
+def update_scenario_file(scenario_file:str,full_path:str, val:Union[int,str,float], target:list = []):
+    if os.path.exists(scenario_file):
+        shutil.copy(scenario_file,os.path.join(full_path,os.path.splitext(os.path.basename(scenario_file))[0]+'_backup.json'))
+        with open(scenario_file, 'r') as file:
+            scenario = json.load(file)
+        
+        current = scenario
+        #check if the target is in the scenario file
+        for key in target[:-1]:
+            if key not in current:
+                resp = input(f"Key {key} not found in {scenario_file}. Continue?[y/n]")
+                if resp.lower() == 'y':
+                    current[key] = {}
+                else:
+                    print("Stopping the process.")
+                    quit()
+                
+            current = current[key]
+        current[target[-1]] = val
+        #['Operator_1']['Fleet_Base']['Operator_1_TNC_MAX_WAIT_TIME']
+
+        with open(scenario_file, 'w') as file:
+            json.dump(scenario,file,indent=4)
+        
+    else:
+        warnings.warn(f"Scenario file {scenario_file} not found in {full_path}.")
+
+def check_scenario_file(scenario_file:str,full_path:str, val:Union[int,str,float], target:list = []):
+    if os.path.exists(scenario_file):
+        shutil.copy(scenario_file,os.path.join(full_path,os.path.splitext(os.path.basename(scenario_file))[0]+'_backup.json'))
+        with open(scenario_file, 'r') as file:
+            scenario = json.load(file)
+        
+        current = scenario
+        #check if the target is in the scenario file
+        for key in target[:-1]:
+            if key not in current:
+                resp = input(f"Key {key} not found in {scenario_file}. Continue?[y/n]")
+                if resp.lower() == 'y':
+                    current[key] = {}
+                else:
+                    print("Stopping the process.")
+                    quit()
+                
+            current = current[key]
+        print(current[target[-1]])
+        #['Operator_1']['Fleet_Base']['Operator_1_TNC_MAX_WAIT_TIME']
+
+        
+        
+    else:
+        warnings.warn(f"Scenario file {scenario_file} not found in {full_path}.")
+
 def bulk_update_scenario_files(path:list, val, folder_path:Path = os.getcwd(), scenario_names: list = ['scenario_abm.json']):
     for folder in os.listdir(folder_path):
         full_path = os.path.join(folder_path,folder)
         if os.path.exists(full_path):
             for scen_file in scenario_names:
                 scenario_file = os.path.join(full_path,scen_file)
-                if os.path.exists(scenario_file):
-                    shutil.copy(scenario_file,os.path.join(full_path,os.path.splitext(os.path.basename(scenario_file))[0]+'_backup.json'))
-                    with open(scenario_file, 'r') as file:
-                        scenario = json.load(file)
-                    
-                    current = scenario
-                    for key in path[:-1]:
-                        current = current[key]
-                    current[path[-1]] = val
-                    #['Operator_1']['Fleet_Base']['Operator_1_TNC_MAX_WAIT_TIME']
-
-                    with open(scenario_file, 'w') as file:
-                        json.dump(scenario,file,indent=4)
-                    
-                else:
-                    warnings.warn(f"Scenario file {scen_file} not found in {full_path}.")
+                update_scenario_file(scenario_file,full_path,val,path)
         else:
             warnings.warn("This folder somehow does not exist despit you looking it up by name... weird.")
 
 def call_ps_action(action):
+    
     try:
         process= subprocess.Popen(action,shell=True)
         stdout, stderr = process.communicate(timeout=600)
@@ -212,15 +272,19 @@ def check_city_prefix(path):
         return None
 
 
-def copy_cases(new_case_path, case_path = '', copy_cases: bool = True, new_cases:list = [], keep_files: list = [], keep_suffixes:list = [], parallel: bool = False, check_city: bool = False):
+def copy_cases(new_case_path, case_path = '', move_cases: bool = True, new_cases:list =[], keep_files: list = [], keep_suffixes:list = [], parallel: bool = False, check_city: bool = False):
+    
+    debug = False
+    skip = False
     tasks = []
     del_tasks = []
+    platform = get_platform_info()
     if check_city and check_city_prefix(new_case_path):
         city = check_city_prefix(new_case_path)
         
         
 
-    if copy_cases: #just completely copy a set of cases from one place to another
+    if move_cases: #just completely copy a set of cases from one place to another
         folds = os.listdir(case_path)
         if not os.path.isdir(new_case_path):
             os.makedirs(new_case_path)
@@ -246,7 +310,94 @@ def copy_cases(new_case_path, case_path = '', copy_cases: bool = True, new_cases
     elif new_cases == [] and (not os.path.isdir(new_case_path) or len(os.listdir(new_case_path))== 0):
         warnings.warn("I don't know what cases I am supposed to copy or there is nothing here for me to update.")
     elif new_cases != []: #take a single base folder and expand it into a bunch of cases
-        warnings.warn("Haven't completed this utility yet.")
+        case_prefix = os.path.basename(case_path)
+        
+        all_vars = []
+        for case_var in new_cases:
+            vars = case_var.values
+            all_vars.append(vars)
+        
+        combinations = list(itertools.product(*all_vars))
+        suffixes = []
+        all_vals = []
+        for combination in combinations:
+            suffix = '_'.join(list(map(str, combination)))
+            suffixes.append(suffix)
+            
+        
+        folds = []
+        copy = True
+        for suffix in suffixes:
+            fold = case_prefix + '_' + suffix
+            folds.append(fold)
+            
+            if not debug:
+                if os.path.isdir(os.path.join(new_case_path,fold)):
+                    pass
+                else:
+                    os.makedirs(os.path.join(new_case_path,fold))
+            for file in os.listdir(case_path):
+                file_path = os.path.join(case_path,file)
+                if os.path.isfile(file_path):
+                    if os.path.isfile(os.path.join(new_case_path,fold,file)) and not skip:
+                        if not copy:
+                            continue
+                        resp = input(f"File {file} already exists in {os.path.join(new_case_path,fold)}. Continue (c for continue without copying)?[y/n/c]")
+                        if resp.lower() == 'y':
+                            resp_all = input("Do you want to skip all future prompts?[y/n]")
+                            if resp_all.lower() == 'y':
+                                skip = True
+                            
+                        elif resp.lower() == 'c':
+                            resp_all = input("Do you want to skip all future prompts?[y/n]")
+                            if resp_all.lower() == 'y':
+                                copy = False
+                                continue
+                            else:
+                                continue
+                        else:
+                            print("Stopping the process.")
+                            quit()
+                                
+            
+                        
+                    if platform == 'Windows':
+                        action = ['copy',file_path,os.path.join(new_case_path,fold)]
+                    else:
+                        action = ' '.join(['cp -R',f"\"{Path(file_path).as_posix()}\"",f"\"{Path(os.path.join(new_case_path,fold)).as_posix()}\""])
+                    if parallel and not debug:
+                        tasks.append(action)
+                    elif not debug:
+                        call_ps_action(action)
+                        
+                        
+
+
+        if parallel and not debug:
+            # Set max_workers to the number of cores on the machine
+            max_workers = os.cpu_count()
+            if platform == 'Windows':
+                with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    executor.map(lambda task: call_ps_action(*task), tasks)
+            else:
+                with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    executor.map(execute_task, tasks)
+        i = 0
+        for case_var in new_cases:
+            scen = case_var.scenario_file
+            target = case_var.json_target
+            if case_var.value_key:
+                key = case_var.value_key
+            j=0
+            for vals in combinations:
+                val = vals[i]
+                if case_var.value_key:
+                    val = key[val]
+                fold_path = os.path.join(new_case_path,folds[j])
+                update_scenario_file(os.path.join(fold_path,scen),fold_path,val,target)
+                j+=1
+            i+=1
+    
     elif keep_files != [] and case_path !='': #copy some files from a primary source folder but keep some of the case files
         if os.path.isdir(new_case_path):
             all_exist = True
@@ -270,28 +421,46 @@ def copy_cases(new_case_path, case_path = '', copy_cases: bool = True, new_cases
                         for file_name in os.listdir(fold_path):
                             if file_name not in keep_files:
                                 file_path = os.path.join(fold_path,file_name)
-                                action = ['del',file_path]
+                                if platform == 'Windows':
+                                    action = ['del',file_path]
+                                else:
+                                    action = ' '.join(['rm -R',f"\"{Path(file_path).as_posix()}\""])
                                 if parallel:
                                     del_tasks.append(action)
+                                else:
+                                    call_ps_action(action)
                                 
                         for file_name in os.listdir(case_path):
                             if file_name not in keep_files:
                                 file_path = os.path.join(case_path,file_name)
-                                action = ['copy',file_path,fold_path]
+                                if platform == 'Windows':
+                                    action = ['copy',file_path,fold_path]
+                                else:
+                                    action = ' '.join(['cp -R',f"\"{Path(file_path).as_posix()}\"",f"\"{Path(fold_path).as_posix()}\""])
                                 if parallel:
                                     tasks.append(action)
+                                else:
+                                    call_ps_action(action)
                 if parallel:
                     # Set max_workers to the number of cores on the machine
                     max_workers = os.cpu_count()
-                    with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                        executor.map(lambda task: call_ps_action(*task), del_tasks)
-                    with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                        executor.map(lambda task: call_ps_action(*task), tasks)  
-
+                    if platform == 'Windows':
+                        with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                            executor.map(lambda task: call_ps_action(*task), del_tasks)
+                        with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                            executor.map(lambda task: call_ps_action(*task), tasks)  
+                    else:
+                        with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                           executor.map(execute_task, del_tasks)
+                        with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                            executor.map(execute_task, tasks)
         else:
             raise FileNotFoundError(f"Nothing in your requested case path {new_case_path}.")
     else:
         raise NotImplementedError("This combination of arguments is not handled.")
+
+def execute_task(action):
+    call_ps_action(action)
 
 def copy_to_new_fold(new_case_path, old_folder_path):
     old_folder_name = os.path.basename(old_folder_path)
