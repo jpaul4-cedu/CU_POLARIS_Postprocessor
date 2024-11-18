@@ -214,7 +214,7 @@ def update_scenario_file(scenario_file:str,full_path:str, val:Union[int,str,floa
     else:
         warnings.warn(f"Scenario file {scenario_file} not found in {full_path}.")
 
-def check_scenario_file(scenario_file:str,full_path:str, val:Union[int,str,float], target:list = []):
+def check_scenario_file(scenario_file:str,full_path:str, target:list = []):
     if os.path.exists(scenario_file):
         shutil.copy(scenario_file,os.path.join(full_path,os.path.splitext(os.path.basename(scenario_file))[0]+'_backup.json'))
         with open(scenario_file, 'r') as file:
@@ -247,6 +247,16 @@ def bulk_update_scenario_files(path:list, val, folder_path:Path = os.getcwd(), s
             for scen_file in scenario_names:
                 scenario_file = os.path.join(full_path,scen_file)
                 update_scenario_file(scenario_file,full_path,val,path)
+        else:
+            warnings.warn("This folder somehow does not exist despit you looking it up by name... weird.")
+
+def bulk_check_scenario_files(target:list, folder_path:Path = os.getcwd(), scenario_names: list = ['scenario_abm.json']):
+    for folder in os.listdir(folder_path):
+        full_path = os.path.join(folder_path,folder)
+        if os.path.exists(full_path):
+            for scen_file in scenario_names:
+                scenario_file = os.path.join(full_path,scen_file)
+                check_scenario_file(scenario_file,full_path,target)
         else:
             warnings.warn("This folder somehow does not exist despit you looking it up by name... weird.")
 
