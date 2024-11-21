@@ -8,6 +8,39 @@ Use the environment.yml file to build a conda environment on the target system. 
 
 Open the folder containing the CU_POLARIS_Postprocessor with VS Code to use directly.
 
+### HPC Usage
+ For Clemson's Palmetto II Slurm based HPC
+ #### Setting Up Polaris
+ POLARIS can only be run within an apptainer container due to GCC dependency issues with Palmetto II's current configuration as of 11/14/24. This package is currently store in Clemson's Gitlab Instance and is available here: https://git.rcd.clemson.edu/jpaul4/polaris_clemson
+
+ Running the apptainer.sif directly should allow any number of scenario configurations to be run with the arguments found in the "converge.py" file. This file is internally built into the built apptainer container and therefore cannot be edited directly but a reference version is provided alongside all files required to build a new container to accomodate POLARIS development. 
+
+ Build the apptainer using the polaris.def file. This must be run in a job as the login node does not have apptainer.
+
+ An sbatch jobscript is provided to demonstrate how to run multiple simultaneous simulations.
+
+ #### Using the CU_POLARIS_Postprocessor
+  ### Install
+  Create a new ananconda environment for the module. You may also want to create an enviroment, strictly for installing mamba into, as the required packages for the CU_POLARIS_Postprocessor (CUPP) are lengthy and using the base conda environment on Palmetto, with all its preinstalled packages, means the conda install takes forever (and may not work at all, I never actually allowed in to finish after over an hour).
+
+  Once the package is installed, you can use it through python command line calls or setup VS Code. The Palmetto II Documentation details how to setup SSH. Use the VS Code Remote - SSH Plugin to connect. I recommend changing the extension settings within VS Code to always show the login prompt. 
+
+  Once connected, open the folder containing the package from VS Code (and log in again). Navigate to the processor demo Jupyter notebook. You can launch a jupyter notebook server from the terminal. Use the SSH Tunnel Palmetto II Documentation for this, as their are other, incorrect instructions for this process in the documentation that I have not gotten to work.
+
+  I recommend instead creating a debugpy interface within your conda environment, adding the following code to the top of your python file
+  
+  ```python
+  import debugpy
+
+  # Allow other computers to attach to debugpy at this IP address and port.
+  debugpy.listen(("0.0.0.0", 5678))
+
+  print("Waiting for debugger attach...")
+  debugpy.wait_for_client()
+  print("Debugger attached, starting execution...")
+  
+
+
 ## Examples
 Please see the jupyter notebook for example usage. The config object holds all the information required by the package to process a folder of POLARIS outputs.
 

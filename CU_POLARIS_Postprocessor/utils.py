@@ -13,6 +13,29 @@ from concurrent import futures
 import platform
 import itertools
 from typing import Union
+from tqdm import tqdm
+import tkinter as tk
+from tkinter import filedialog
+from enum import Enum
+import math
+import inspect
+
+def get_working_directory_of_caller():
+    # Get the current stack frame
+    current_frame = inspect.currentframe()
+    # Get the caller's frame (one level up the stack)
+    caller_frame = current_frame.f_back
+    # Get the working directory of the caller
+    caller_working_directory = caller_frame.f_globals['__file__']
+    return os.path.dirname(os.path.abspath(caller_working_directory))
+
+def select_file():
+    wd = get_working_directory_of_caller()
+    root = tk.Tk()
+    root.withdraw()  # Hide the root window
+    file_path = filedialog.askdirectory(initialdir=wd)  # Open file selection dialog
+    return Path(file_path)
+
 
 class CaseVariableData:
     def __init__(self, variable_name:str, scenario_file:str, json_target:list, values:list, value_key:dict = None):
@@ -214,9 +237,8 @@ def update_scenario_file(scenario_file:str,full_path:str, val:Union[int,str,floa
     else:
         warnings.warn(f"Scenario file {scenario_file} not found in {full_path}.")
 
-def check_scenario_file(scenario_file:str,full_path:str, val:Union[int,str,float], target:list = []):
+def check_scenario_file(scenario_file:str,full_path:str, target:list = []):
     if os.path.exists(scenario_file):
-        shutil.copy(scenario_file,os.path.join(full_path,os.path.splitext(os.path.basename(scenario_file))[0]+'_backup.json'))
         with open(scenario_file, 'r') as file:
             scenario = json.load(file)
         
@@ -232,29 +254,45 @@ def check_scenario_file(scenario_file:str,full_path:str, val:Union[int,str,float
                     quit()
                 
             current = current[key]
-        print(current[target[-1]])
+           
+        print(f"{os.path.basename(full_path)}, {target[-1]}, {current[target[-1]]}")
         #['Operator_1']['Fleet_Base']['Operator_1_TNC_MAX_WAIT_TIME']
-
-        
-        
     else:
         warnings.warn(f"Scenario file {scenario_file} not found in {full_path}.")
 
-def bulk_update_scenario_files(path:list, val, folder_path:Path = os.getcwd(), scenario_names: list = ['scenario_abm.json']):
+def bulk_update_scenario_files(target:list, val, folder_path:Path = os.getcwd(), scenario_names: list = ['scenario_abm.json']):
+    updates = []
     for folder in os.listdir(folder_path):
         full_path = os.path.join(folder_path,folder)
         if os.path.exists(full_path):
             for scen_file in scenario_names:
                 scenario_file = os.path.join(full_path,scen_file)
-                update_scenario_file(scenario_file,full_path,val,path)
+                updates.append({"scenario_file":scenario_file,"full_path":full_path,"val":val,"target":target})
+    
+        else:
+            warnings.warn("This folder somehow does not exist despit you looking it up by name... weird.")
+    for update in tqdm(updates,desc="Updating Scenario Files"):
+        update_scenario_file(**update)
+    
+def bulk_check_scenario_files(target:list, folder_path:Path = os.getcwd(), scenario_names: list = ['scenario_abm.json']):
+    for folder in os.listdir(folder_path):
+        full_path = os.path.join(folder_path,folder)
+        if os.path.exists(full_path):
+            for scen_file in scenario_names:
+                scenario_file = os.path.join(full_path,scen_file)
+                check_scenario_file(scenario_file,full_path,target)
         else:
             warnings.warn("This folder somehow does not exist despit you looking it up by name... weird.")
 
 def call_ps_action(action):
     
     try:
-        process= subprocess.Popen(action,shell=True)
+        process= subprocess.Popen(action,shell=True, stdout=subprocess.DEVNULL)
         stdout, stderr = process.communicate(timeout=600)
+        if stdout:
+            print(stdout.decode())
+        if stderr:
+            print(stderr.decode())
     except subprocess.TimeoutExpired:
         print("Process timed out")
         process.kill()  # Kill the process if it times out
@@ -266,25 +304,22 @@ def call_ps_action(action):
             process.kill()  # Ensure it’s terminated
 
 def check_city_prefix(path):
+
+    if len(os.path.basename(path)) == 3:
+        return os.path.basename(path)
     if len(os.path.basename(path).split('_')[0]) ==3:
         return os.path.basename(path).split('_')[0]
     else:
         return None
 
-
 def copy_cases(new_case_path, case_path = '', move_cases: bool = True, new_cases:list =[], keep_files: list = [], keep_suffixes:list = [], parallel: bool = False, check_city: bool = False):
     
     debug = False
     skip = False
-    tasks = []
-    del_tasks = []
-    platform = get_platform_info()
-    if check_city and check_city_prefix(new_case_path):
-        city = check_city_prefix(new_case_path)
-        
-        
-
+    moves ={}
     if move_cases: #just completely copy a set of cases from one place to another
+        type = "copy"
+        items =[]
         folds = os.listdir(case_path)
         if not os.path.isdir(new_case_path):
             os.makedirs(new_case_path)
@@ -294,22 +329,28 @@ def copy_cases(new_case_path, case_path = '', move_cases: bool = True, new_cases
                 pass
             elif os.path.isdir(full_path):
                 fold_suffix = fold.split('_')[-1]
-                if fold_suffix in keep_suffixes:
-                    if parallel:
-                        task = [new_case_path,full_path]
-                        tasks.append(task)
-                    else:
-                        copy_to_new_fold(new_case_path,full_path)
-
-        if parallel:
-            # Set max_workers to the number of cores on the machine
-            max_workers = os.cpu_count()
-            with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                executor.map(lambda task: copy_to_new_fold(*task), tasks)
+                if keep_suffixes !=None and keep_suffixes != []:
+                    if fold_suffix in keep_suffixes:
+                        continue
+                old_folder_name = os.path.basename(full_path)
+                new_fold = os.path.join(new_case_path,old_folder_name)
+                actions =[]
+                if not os.path.isdir(new_fold):
+                    os.makedirs(new_fold)
+                for item in os.listdir(full_path):
+                    sub_path = os.path.join(full_path,item)
+                    if os.path.isfile(sub_path) and not os.path.isfile(os.path.join(new_fold,item)):
+                        move = (sub_path,os.path.join(new_fold,item))
+                        items.append(move)
+        moves[type] = items
 
     elif new_cases == [] and (not os.path.isdir(new_case_path) or len(os.listdir(new_case_path))== 0):
         warnings.warn("I don't know what cases I am supposed to copy or there is nothing here for me to update.")
     elif new_cases != []: #take a single base folder and expand it into a bunch of cases
+        warnings.warn("This has not yet been debugged... proceed with caution.")
+        type = "copy"
+        items =[]
+        
         case_prefix = os.path.basename(case_path)
         
         all_vars = []
@@ -360,45 +401,15 @@ def copy_cases(new_case_path, case_path = '', move_cases: bool = True, new_cases
                             quit()
                                 
             
-                        
-                    if platform == 'Windows':
-                        action = ['copy',file_path,os.path.join(new_case_path,fold)]
-                    else:
-                        action = ' '.join(['cp -R',f"\"{Path(file_path).as_posix()}\"",f"\"{Path(os.path.join(new_case_path,fold)).as_posix()}\""])
-                    if parallel and not debug:
-                        tasks.append(action)
-                    elif not debug:
-                        call_ps_action(action)
-                        
-                        
+                    move = (file_path,os.path.join(new_case_path,fold,file))
+                    items.append(move)
+        moves[type] = items                       
 
-
-        if parallel and not debug:
-            # Set max_workers to the number of cores on the machine
-            max_workers = os.cpu_count()
-            if platform == 'Windows':
-                with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    executor.map(lambda task: call_ps_action(*task), tasks)
-            else:
-                with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    executor.map(execute_task, tasks)
-        i = 0
-        for case_var in new_cases:
-            scen = case_var.scenario_file
-            target = case_var.json_target
-            if case_var.value_key:
-                key = case_var.value_key
-            j=0
-            for vals in combinations:
-                val = vals[i]
-                if case_var.value_key:
-                    val = key[val]
-                fold_path = os.path.join(new_case_path,folds[j])
-                update_scenario_file(os.path.join(fold_path,scen),fold_path,val,target)
-                j+=1
-            i+=1
-    
     elif keep_files != [] and case_path !='': #copy some files from a primary source folder but keep some of the case files
+        type1 = "copy"
+        type2 = "delete"
+        items1 =[]
+        items2 = []
         if os.path.isdir(new_case_path):
             all_exist = True
             for fold in os.listdir(new_case_path):
@@ -421,55 +432,205 @@ def copy_cases(new_case_path, case_path = '', move_cases: bool = True, new_cases
                         for file_name in os.listdir(fold_path):
                             if file_name not in keep_files:
                                 file_path = os.path.join(fold_path,file_name)
-                                if platform == 'Windows':
-                                    action = ['del',file_path]
-                                else:
-                                    action = ' '.join(['rm -R',f"\"{Path(file_path).as_posix()}\""])
-                                if parallel:
-                                    del_tasks.append(action)
-                                else:
-                                    call_ps_action(action)
-                                
+                                move = (file_path)
+                                items2.append(move)
+                        
                         for file_name in os.listdir(case_path):
                             if file_name not in keep_files:
                                 file_path = os.path.join(case_path,file_name)
-                                if platform == 'Windows':
-                                    action = ['copy',file_path,fold_path]
-                                else:
-                                    action = ' '.join(['cp -R',f"\"{Path(file_path).as_posix()}\"",f"\"{Path(fold_path).as_posix()}\""])
-                                if parallel:
-                                    tasks.append(action)
-                                else:
-                                    call_ps_action(action)
-                if parallel:
-                    # Set max_workers to the number of cores on the machine
-                    max_workers = os.cpu_count()
-                    if platform == 'Windows':
-                        with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                            executor.map(lambda task: call_ps_action(*task), del_tasks)
-                        with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                            executor.map(lambda task: call_ps_action(*task), tasks)  
-                    else:
-                        with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                           executor.map(execute_task, del_tasks)
-                        with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                            executor.map(execute_task, tasks)
+                                move = (file_path,fold_path)
+                                items1.append(move)
+                
+                moves[type1] = items1
+                moves[type2] = items2
+                
         else:
             raise FileNotFoundError(f"Nothing in your requested case path {new_case_path}.")
     else:
         raise NotImplementedError("This combination of arguments is not handled.")
+    
+    if len(moves) > 0:
+        copy_tasks, del_tasks = create_tasks(moves)
+        run_tasks(parallel,copy_tasks,del_tasks)
+    if new_cases != []:
+        update_new_scenarios(new_cases, combinations, new_case_path, folds)
+
+def update_new_scenarios(new_cases:list, combinations:list, new_case_path:str, folds:list):
+    i = 0
+    for case_var in new_cases:
+        scen = case_var.scenario_file
+        target = case_var.json_target
+        if case_var.value_key:
+            key = case_var.value_key
+        j=0
+        for vals in combinations:
+            val = vals[i]
+            if case_var.value_key:
+                val = key[val]
+            fold_path = os.path.join(new_case_path,folds[j])
+            update_scenario_file(os.path.join(fold_path,scen),fold_path,val,target)
+            j+=1
+        i+=1
+
+def create_tasks(moves:dict):
+    copy_tasks = []
+    del_tasks = []
+    platform = get_platform_info()
+    for key, items in moves.items():
+        if key == "copy":
+            tasks = []
+            for item in items:
+                old_path = item[0]
+                new_path = item[1]
+                if platform == 'Windows':
+                    action = ['copy',old_path,new_path]
+                else:
+                    action = ' '.join(['cp -R',f"\"{Path(old_path).as_posix()}\"",f"\"{Path(new_path).as_posix()}\""])
+                copy_tasks.append(action)
+        elif key == "delete":
+            del_tasks = []
+            for item in items:
+                old_path = item
+                if platform == 'Windows':
+                    action = ['del',old_path]
+                else:
+                    action = ' '.join(['rm -r',f"\"{Path(old_path).as_posix()}\""])
+                del_tasks.append(action)
+    return copy_tasks, del_tasks
+
+def run_tasks(parallel:bool = True, copy_tasks:list = [], del_tasks:list = []):
+    # Set max_workers to the number of cores on the machine
+    max_workers = os.cpu_count()+4
+    platform = get_platform_info()
+    if parallel:
+        if platform == 'Windows':
+            with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                list(tqdm(executor.map(call_ps_action, del_tasks),total=len(del_tasks),desc="Deleting Items"))
+            with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                list(tqdm(executor.map(call_ps_action, copy_tasks),total=len(copy_tasks),desc="Moving/Copying Items")) 
+        else:
+            with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                list(tqdm(executor.map(execute_task, del_tasks),total=len(del_tasks),desc="Deleting Items"))
+            with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                list(tqdm(executor.map(execute_task, copy_tasks),total=len(copy_tasks),desc="Moving/Copying Items"))
+    else:
+        if platform == 'Windows':
+            for action in del_tasks:
+                call_ps_action(action)
+            for action in copy_tasks:
+                call_ps_action(action)
+        else:
+            for action in del_tasks:
+                execute_task(action)
+            for action in copy_tasks:
+                execute_task(action)
 
 def execute_task(action):
     call_ps_action(action)
 
-def copy_to_new_fold(new_case_path, old_folder_path):
-    old_folder_name = os.path.basename(old_folder_path)
-    new_fold = os.path.join(new_case_path,old_folder_name)
-    if not os.path.isdir(new_fold):
-        os.makedirs(new_fold)
-    for item in os.listdir(old_folder_path):
-        sub_path = os.path.join(old_folder_path,item)
-        if os.path.isfile(sub_path) and not os.path.isfile(os.path.join(new_fold,item)):
-            action = ['copy',sub_path,os.path.join(new_fold,item)]
-            call_ps_action(action)
-            
+class MailType(Enum):
+    NONE = "NONE"
+    BEGIN = "BEGIN"
+    END = "END"
+    FAIL = "FAIL"
+    REQUEUE = "REQUEUE"
+    ALL = "ALL"
+
+class CityKey( ):
+    def __init__(self, city_name:str, city_prefix:str, city_scale_factor:float, city_mem:float, city_time=int):
+        self.city_name = city_name
+        self.city_prefix = city_prefix
+        self.city_scale_factor = city_scale_factor
+        self.city_mem = city_mem
+        self.city_time = city_time
+
+class PolarisRunConfig():
+    def __init__(self, container_path:str, run_script:str, threads:int, abm_init:bool, skim_init:bool, abm_runs:int,cities: list):
+        self.container_path = container_path
+        if os.path.split(run_script)[0] in ["home","scratch"]:
+            warnings.warn("This file is usually located inside the container, but doesn't have to be. You need to manually bind this if so.")
+        self.run_script = run_script
+        self.threads = threads
+        self.abm_init = abm_init
+        self.skim_init = skim_init
+        self.abm_runs = abm_runs
+        self.cities = cities
+        for city in self.cities:
+            city_time = city.city_time
+            total_time = city_time * self.abm_runs
+            frac_part, int_part = math.modf(total_time)
+            hr = int(int_part)
+            min = frac_part * 60
+            if len(str(min)) == 1:
+                min = '0'  + str(int(min))
+            city.city_total_time = f"""{hr}:{int(min)}:00"""
+        
+
+def create_jobscript(job_name:str = "",nodes:int =1,cpus_per_task:int = 8,
+                     mail_user:str="", mail_type: MailType = MailType.NONE,case_dir:str = "",config:PolarisRunConfig = None):
+    
+    citykeys = config.cities
+
+    if case_dir == "":
+        print("Please provide a case directory.")
+        return
+    
+    #create folder called run in case directory
+    run_dir = os.path.join(case_dir,"run")
+    if not os.path.exists(run_dir):
+        os.makedirs(run_dir)
+    #loop through the folders in the case directory and expand the tree until a folder level containing at least one .sqlite file is found. Retain these folder paths in a list
+    folders_with_sqlite = []
+    for root, dirs, files in os.walk(case_dir):
+        for file in files:
+            if file.endswith('.sqlite'):
+                folders_with_sqlite.append(root)
+                break  # No need to check other files in this folder
+    if len(folders_with_sqlite) == 0:
+        print("No .sqlite files found in the case directory.")
+        return
+    
+    cities = []
+    city_folder_dict = {}
+    for fold in folders_with_sqlite:
+        city = check_city_prefix(fold)
+        cities.append(city)
+        folds = city_folder_dict.get(city,[])
+        folds.append(fold)
+        city_folder_dict[city] = folds
+
+    unique_cities = list(set(cities))
+    city_dict = {city.city_prefix: city for city in citykeys}
+
+
+    for city in unique_cities:
+        script_path = os.path.join(run_dir,f"jobscript_{city}.sh")
+        formatted_paths = "\n".join([f'"{path}"' for path in city_folder_dict[city]])
+        if city in city_dict:
+            city_info = city_dict[city]
+            time = city_info.city_total_time
+            mem_per_task = city_info.city_mem
+
+        jobscript_header = f"""#!/bin/bash
+        #SBATCH --job-name={job_name}
+        #SBATCH --nodes={nodes}
+        #SBATCH --time={time}
+        #SBATCH --cpus-per-task={cpus_per_task}
+        #SBATCH --mem={mem_per_task}gb
+        #SBATCH --mail-user={mail_user}
+        #SBATCH --mail-type={mail_type}"""
+
+        if len(folders_with_sqlite) > 1:
+            jobscript_header += f"""\n#SBATCH --array=0-{len(folders_with_sqlite)-1}"""
+            jobscript_header +=f"""\n\nPATHS=(
+                                {formatted_paths}
+                                )"""
+            jobscript_header += f"""\n\nSCENARIO_PATH=${{PATHS[$SLURM_ARRAY_TASK_ID]}}"""
+
+        jobscript_header += """\n\n#SBATCH --output=${LOG_DIR}/output_%A_%a.out
+                            #SBATCH --error=${LOG_DIR}/error_%A_%a.err"""
+
+        jobscript_header += f"""\n\napptainer exec --bind "$SCENARIO_PATH":/mnt/data {config.container_path} python3 {config.run_script} /mnt/data {config.threads} {config.abm_init} {config.skim_init} {config.abm_runs} {city_info.city_name} {city_info.city_scale_factor}"""
+
+        with open(script_path, 'w') as file:
+            file.write(jobscript_header)
