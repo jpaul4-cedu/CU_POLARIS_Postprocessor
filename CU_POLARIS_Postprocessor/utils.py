@@ -284,6 +284,16 @@ def bulk_check_scenario_files(target:list, folder_path:Path = os.getcwd(), scena
         else:
             warnings.warn("This folder somehow does not exist despit you looking it up by name... weird.")
 
+def bulk_check_scenario_files(target:list, folder_path:Path = os.getcwd(), scenario_names: list = ['scenario_abm.json']):
+    for folder in os.listdir(folder_path):
+        full_path = os.path.join(folder_path,folder)
+        if os.path.exists(full_path):
+            for scen_file in scenario_names:
+                scenario_file = os.path.join(full_path,scen_file)
+                check_scenario_file(scenario_file,full_path,target)
+        else:
+            warnings.warn("This folder somehow does not exist despit you looking it up by name... weird.")
+
 def call_ps_action(action):
     
     try:
