@@ -301,4 +301,69 @@ def process_tnc_stat_summary(iter_dir, demand_db,folder, config:PostProcessingCo
     summary_df.to_csv(iter_dir.as_posix() + '/tnc_stat_summary_helper.csv')
     return summary_df
 
+def process_demo_financial_case_data(iter_dir, demand_db, result_db, request_file_name, trip_multiplier, **kwargs):
 
+    ride_min_min = 5
+    per_min_min=1.4
+    per_mile_min=0.51
+
+    uber_take=0.21
+
+    km_mile = 0.621371
+
+    fare_pub_low= 2
+    fare_pub_high = 4
+    op_pub_van=3.54/km_mile
+    op_pub_minibus=1.96/km_mile
+
+    op_cost_saev_p = 0.58/km_mile
+    op_cost_saev_np=0.48/km_mile
+    req_case_sum = pd.DataFrame()
+    with sqlite3.connect(iter_dir.as_posix() + '/'+ result_db) as conn:
+        conn.cursor().executescript(f"""attach database '{iter_dir.as_posix()+'/'+demand_db}' as a;""");
+        fleet_size = pd.read_sql("""select (SELECT count(*) as fleet_size FROM TNC_Statistics) as fleet_size, (select count(*) from tnc_request) as requests;""",conn) * trip_multiplier
+        rev_vht_vmt = pd.read_sql(f"""select sum(end-start)/60 as revenue_minutes_traveled, sum(travel_distance)/1609.34 as revenue_miles_traveled from tnc_trip where passengers >0""",conn)*trip_multiplier
+        
+
+
+        
+    dir_name = os.path.split(os.path.split(iter_dir.absolute())[0])[1]
+    req_df = pd.read_csv(iter_dir.as_posix()+'/'+request_file_name).assign(folder=dir_name+'_7')
+    req_df['pay_1_a_calc'] = req_df['skim_dist']*per_mile_min+req_df['skim_time']*per_min_min
+    req_df['pay_1_a_act']=req_df['pay_1_a_calc'].apply(lambda x: x if x >= 5 else 5)
+    #get the fare for case 1 from the request summary row
+
+    #1_b comes straight from the trips but need to count requests
+
+    req_df['fare_2_low']=2
+    req_df['fare_2_high']=4
+    req_df['op_2_van']=req_df['skim_dist']*op_pub_van
+    req_df['op_2_minibus']=req_df['skim_dist']*op_pub_minibus
+    
+    req_df.loc[req_df["pooled_service"]==1,'op3']=req_df['skim_dist']*op_cost_saev_p
+    req_df.loc[req_df["pooled_service"]!=1,'op3']=req_df['skim_dist']*op_cost_saev_np
+
+
+
+    req_sum_df = req_df.groupby(['age_class','origin_zone']).apply(lambda x: pd.Series({
+    'total pay 1_a': x['pay_1_a_act'].sum() * trip_multiplier,
+    '1_a_cnt_req_under_5': (x['pay_1_a_calc'] < 5).sum() * trip_multiplier,
+    'total_fare_2_low': x['fare_2_low'].sum() * trip_multiplier,
+    'total_fare_2_high': x['fare_2_high'].sum() * trip_multiplier,
+    'total_operating_cost_2_minibus': x['op_2_minibus'].sum() * trip_multiplier,
+    'total_operating_cost_2_van': x['op_2_van'].sum() * trip_multiplier,
+    'total_operating_cost_3': x['op3'].sum() * trip_multiplier,
+    'total_fare': x['corrected fare'].sum() * trip_multiplier,
+    'requests': fleet_size['requests'].iloc[0],  # Extract scalar value
+    'fleet_size': fleet_size['fleet_size'].iloc[0],  # Extract scalar value
+    'revenue per vehicle': x['corrected fare'].sum() * trip_multiplier / fleet_size['fleet_size'].iloc[0],
+    'revenue per request': x['corrected fare'].sum() * trip_multiplier / fleet_size['requests'].iloc[0],
+    'revenue_minutes_traveled': rev_vht_vmt['revenue_minutes_traveled'].iloc[0],  # Extract scalar value
+    'revenue_miles_traveled': rev_vht_vmt['revenue_miles_traveled'].iloc[0],  # Extract scalar value
+    'folder': dir_name + '_7'
+    })).reset_index()
+
+
+    req_case_sum = pd.concat([req_case_sum,req_sum_df])
+    req_case_sum['uber take']=req_case_sum['total_fare']*uber_take
+    return req_case_sum

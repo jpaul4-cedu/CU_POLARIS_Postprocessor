@@ -46,6 +46,7 @@ class PostProcessingConfig:
             "closest_stops":("process_nearest_stops", {}),
             "tnc_skim_demo":("process_elder_request_agg", {}),
             "tnc_stat_summary":("process_tnc_stat_summary",{}),
+            "demo_financial_case_data":("process_demo_financial_case_data",{})
         }
         
         self.desired_outputs = desired_outputs if desired_outputs is not None else {
@@ -73,6 +74,7 @@ class PostProcessingConfig:
             'tnc_stat_summary':'postprocessing',
             'tnc_skim_demo':'postprocessing',
             'tnc_stat_summary_helper':'sql_helper',
+            'demo_financial_case_data':'postprocessing',
             'activity_times': 'sql'
         }
         self.output_h5 = output_h5

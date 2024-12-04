@@ -10,7 +10,7 @@ from .config import PostProcessingConfig
 import pandas as pd
 import itertools
 import json
-from .postprocessing import process_batch_nearest_stops, process_elder_request_agg, process_nearest_stops, process_solo_equiv_fare, process_tnc_stat_summary
+from .postprocessing import process_batch_nearest_stops, process_elder_request_agg, process_nearest_stops, process_solo_equiv_fare, process_tnc_stat_summary, process_demo_financial_case_data
 
 def parallel_process_folders(config:PostProcessingConfig):
     # Get a list of all subfolders in the parent folder
@@ -18,7 +18,9 @@ def parallel_process_folders(config:PostProcessingConfig):
     folders = [Path(os.path.join(parent_folder, f)) for f in os.listdir(parent_folder) if os.path.isdir(os.path.join(parent_folder, f))]
 
     # Use ThreadPoolExecutor or ProcessPoolExecutor to process folders in parallel
-    with concurrent.futures.ThreadPoolExecutor() as executor:
+    #workers = os.cpu_count() + 4
+    workers = 1
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
         results = list(executor.map(process_folder, folders, itertools.repeat(config)))
 
     collected_results={}
@@ -132,6 +134,7 @@ def process_folder(dir, config:PostProcessingConfig):
                         func_args['result_db']=result_db
                         func_args['trip_multiplier']=trip_multiplier
                         func_args['config']=config
+                        func_args["request_file_name"] = "requests.csv"
                         # Call the function by name using globals()
                         print(f"Processing {filename} with {func_name} for {folder}.")
                         if func_name in globals():
