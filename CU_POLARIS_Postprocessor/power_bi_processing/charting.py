@@ -1153,6 +1153,21 @@ class demographic_queries():
         
         self.demo_activity_time_usage_df =  filtered_rows
 
+    def closest_stops_helper(self,aggregators):
+        grouped_rows = self.closest_stops_by_zone(aggregators).groupby(['Walking Distance to Bus Stop', 'zone', 'City']).agg({
+        'count': 'sum',
+            'total_income': 'sum'
+        }).reset_index()
+        
+        # Remove 'Total Income' column
+        grouped_rows = grouped_rows.drop(columns=['total_income'])
+        
+        # Change column types
+        grouped_rows['zone'] = grouped_rows['zone'].astype(str)
+        grouped_rows['Walking Distance to Bus Stop'] = grouped_rows['Walking Distance to Bus Stop'].astype(bool)
+        
+        return grouped_rows
+
     def hh_inc_hist(self,aggregators):
         # Remove 'HH Inc Quartile' column
         hh_inc_map = self.hh_inc_map_df.copy()
@@ -1174,7 +1189,7 @@ class demographic_queries():
         hh_inc_map = hh_inc_map.rename(columns={'Rounded Income Final': 'Rounded Income'})
         
         # Merge with closest_stops_by_zone
-        merged_data = hh_inc_map.merge(self.closest_stops_by_zone(aggregators), on=['zone', 'City'], how='left')
+        merged_data = hh_inc_map.merge(self.closest_stops_helper(aggregators), on=['zone', 'City'], how='left')
         
         # Group rows by 'Rounded Income', 'City', and 'Walking Distance to Bus Stop' and calculate sum of 'HH_Count' and 'dist.Count'
         grouped_rows = merged_data.groupby(['Rounded Income', 'City', 'Walking Distance to Bus Stop']).agg({
@@ -1182,7 +1197,7 @@ class demographic_queries():
             'count': 'sum'
         }).reset_index()
         
-        grouped_rows.rename(columns={'household_count': "House Hold Count","count":"dist.Count"},inplace=True)
+        grouped_rows.rename(columns={'household_count': "House Hold Count"},inplace=True)
         # Change column types
         grouped_rows['Walking Distance to Bus Stop'] = grouped_rows['Walking Distance to Bus Stop'].astype(str)
         
@@ -1190,10 +1205,10 @@ class demographic_queries():
         grouped_rows['Walking Distance to Bus Stop'] = grouped_rows['Walking Distance to Bus Stop'].fillna('n/a')
         
         # Pivot column
-        pivoted_rows = grouped_rows.pivot_table(index=['Rounded Income', 'City'], columns='Walking Distance to Bus Stop', values='dist.Count', aggfunc='sum').reset_index()
+        pivoted_rows = grouped_rows.pivot_table(index=['Rounded Income', 'City','House Hold Count'], columns='Walking Distance to Bus Stop', values='count', aggfunc='sum').reset_index()
         
         # Rename columns
-        pivoted_rows = pivoted_rows.rename(columns={'True': 'W/ Bus Access', 'False': 'W/O Bus Access'})
+        pivoted_rows = pivoted_rows.rename(columns={'House Hold Count':'Count','True': 'W/ Bus Access', 'False': 'W/O Bus Access'})
         
         self.hh_inc_hist_df = pivoted_rows
 
