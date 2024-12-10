@@ -113,6 +113,7 @@ def pre_run_checks(config:PostProcessingConfig):
                 for item in items:
                     if outer_key=='sql':
                         sql_tables.append(item)
+        config.update_config(sql_tables=sql_tables)
         clean_analysis(config)
         config.update_config(fresh_start=False)
 
