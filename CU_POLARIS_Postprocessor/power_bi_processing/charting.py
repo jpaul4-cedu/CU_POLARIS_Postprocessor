@@ -7,8 +7,20 @@ import h5py
 import sqlite3
 import os
 from pathlib import Path
+import shutil
+import concurrent
+from tkinter import filedialog, messagebox, Toplevel
+import time
+import threading
+from tqdm import tqdm
+import subprocess
+import tkinter as tk
+#pd.options.mode.chained_assignment = None  # default='warn'
+
 
 def load_h5_table(path, key):
+        if not path.endswith('.h5'):
+            path = path + '/results.h5'
         return pd.read_hdf(path,key=key)
 
 class transit_queries():
@@ -616,7 +628,7 @@ class mode_shift_queries():
         columns_to_keep = [
             "folder","City","Fleet Size","Strategy","Iteration","Net Positive Shift Avg"
         ]
-        filtered_data = mode_dist_combo_proactive[columns_to_keep]
+        filtered_data = mode_dist_combo_proactive[columns_to_keep].copy()
         
 # Change the type of "Fleet Size" to numeric
         filtered_data["Fleet Size"] = pd.to_numeric(filtered_data["Fleet Size"], errors='coerce')
@@ -726,7 +738,7 @@ class demographic_queries():
 
     def mode_data(self,aggregators):
         zone_data_df = self.zone_data(aggregators)
-        filtered_rows = zone_data_df[(zone_data_df['age_class'] == 2) & (zone_data_df['mode'] != 'FAIL_REROUTE')]
+        filtered_rows = zone_data_df[(zone_data_df['age_class'] == 2) & (zone_data_df['mode'] != 'FAIL_REROUTE')].copy()
     
         # Add 'average travel distance' column
         filtered_rows['average travel distance'] = filtered_rows['total_travel_distance_miles'] / filtered_rows['trip_count']
@@ -863,14 +875,14 @@ class demographic_queries():
         merged_data = merged_data.sort_values(by='zone')
         
         # Merge with tnc_request_demo_agg
-        merge_cols = [col for col in aggregators['Folder to Columns'] if col is not None]
+        merge_cols = [col for col in aggregators['Folder to Columns'] if col is not None] +['zone']
         final_data = merged_data.merge(self.tnc_request_demo_agg(aggregators), on=merge_cols, how='left')
         
         return final_data
 
     def tnc_request_demo_agg(self,aggregators):
         tnc_request_demo = self.tnc_request_demo(aggregators)
-        filtered_rows = tnc_request_demo[tnc_request_demo['age_class'] == 2]
+        filtered_rows = tnc_request_demo[tnc_request_demo['age_class'] == 2].copy()
 
         filtered_rows.rename(columns={
             'request_count': 'Request Count',
@@ -882,7 +894,7 @@ class demographic_queries():
         
         # Change column types
         filtered_rows = filtered_rows.astype({
-            'zone': 'int64',
+            'zone': 'str',
             'City': 'str',
             'Fleet Size': 'int64',
             'Strategy': 'str',
@@ -933,7 +945,8 @@ class demographic_queries():
         # load the supply sqlite database
         comb_zone_df = None
         for city,prefix in city_names.items():
-            path = os.path.join(db_path, f'{city}-Supply.sqlite')
+            path = db_path[city]
+            #path = os.path.join(db_path, f'{city}-Supply.sqlite')
             with sqlite3.connect(path) as conn:
                 # load the zone table
                 zone_df = pd.read_sql_query("SELECT zone FROM zone order by zone", conn)
@@ -1113,7 +1126,7 @@ class demographic_queries():
         grouped_rows['Total Trips'] = grouped_rows['SOV_Trips'] + grouped_rows['TAXI_Trips'] + grouped_rows['BUS_Trips'] + grouped_rows['RAIL_Trips']
         
         # Filter rows where type is not 'HOME' or 'WORK AT HOME'
-        filtered_rows = grouped_rows[(grouped_rows['type'] != 'HOME') & (grouped_rows['type'] != 'WORK AT HOME')]
+        filtered_rows = grouped_rows[(grouped_rows['type'] != 'HOME') & (grouped_rows['type'] != 'WORK AT HOME')].copy()
         
         # Add share columns
         filtered_rows['SOV Share'] = filtered_rows['SOV_Travel Time'] / filtered_rows['Total Travel Time']
@@ -1237,7 +1250,7 @@ class demographic_queries():
         
         return pivoted_data
 
-    def vehicle_ownership(self,aggregators):
+    def vehicle_ownership(self, path, aggregators):
         vo = load_h5_table(path,'fare_sensitivity_results_vo')
         grouped_rows = vo.groupby(['City', 'zone']).agg({
         'households': 'sum',
@@ -1273,8 +1286,6 @@ class demographic_queries():
         
         self.vehicle_ownership_df = merged_data
 
-    
-
     def run_demographic_queries(self,path,aggregators,db_path,city_names):
         self.load_tables(path)
         self.hh_inc_map(aggregators)
@@ -1282,14 +1293,13 @@ class demographic_queries():
         self.demo_agg_tnc_case(aggregators,db_path,city_names)
         self.demo_agg_mode_data(aggregators)
         self.hh_inc_hist(aggregators)
-        self.vehicle_ownership(aggregators)
+        self.vehicle_ownership(path, aggregators)
 
 class financial_study():
     def __init__(self,path,aggregators,demographic_study:demographic_queries):
         self.demo_financial_case_data_df = demographic_study.demographic_df
         self.run_financial_queries(path,aggregators)
         
-
     def load_tables(self,path):
         self.tnc_summary_df = load_h5_table(path,'fare_sensitivity_results')
         self.pooling_rate_df = load_h5_table(path,'tnc_results_discount')
@@ -1323,7 +1333,7 @@ class financial_study():
         })
         
         # Filter rows where age_class is 2
-        filtered_rows = dataset[dataset['age_class'] == 2]
+        filtered_rows = dataset[dataset['age_class'] == 2].copy()
         
         # Change column type for 'origin_zone'
         filtered_rows['origin_zone'] = filtered_rows['origin_zone'].astype(str)
@@ -1382,7 +1392,6 @@ class financial_study():
         self.financial_case_data_df = grouped_rows
         return grouped_rows
         
-
     def case_1_a(self,aggregators):
         # Remove specified columns
         financial_cases = self.financial_case_data_df.copy()
@@ -1535,79 +1544,323 @@ class financial_study():
         self.combined_financial_cases(aggregators)
         self.demo_financial_case_data_study(aggregators)
 
+class ttest_queries():
+    def __init__(self,path,aggregators):
+        self.load_tables(path)
+        self.tnc_t_tests_master(aggregators)
+    
+    def load_tables(self,path):
+        self.ttest_df = load_h5_table(path,'tnc_ttests')
+
+    def tnc_t_tests_master(self,aggregators):
+        dataset = self.ttest_df.copy()
+
+        # Change the column type of "p-value" to float
+        dataset['p-value'] = dataset['p-value'].astype(float)
+
+        # Add a custom column "significance level" based on the "p-value"
+        dataset['significance level'] = dataset['p-value'].apply(
+            lambda x: '***' if x < 0.005 else ('**' if x < 0.01 else ('*' if x < 0.05 else ''))
+        )
+
+        # Change the column types of multiple columns
+        dataset = dataset.astype({
+            'city': str,
+            'base_case': str,
+            'folder': str,
+            'metric': str,
+            't-statistic': float,
+            'p-value': float,
+            'significance level': str,
+            'value': str
+        })
+
+        # Filter out rows where the "value" column is "#N/A"
+        dataset = dataset[dataset['value'] != "#N/A"]
+
+        # Change the column type of "value" to float
+        dataset['value'] = dataset['value'].astype(float)
+
+        # Add a custom column "value_significance" that combines the "value" and "significance level"
+        dataset['value_significance'] = dataset.apply(
+            lambda row: f"{round(row['value'], 2)} {row['significance level']}", axis=1
+        )
+
+        # Replace specific metric names with more readable names
+        replacements = {
+            "wait_min": "Wait Time",
+            "ttime": "Travel Time",
+            "discount": "Discount",
+            "fare": "Fare",
+            "pooled": "Pooling %",
+            "occupied_VMT": "rVMT",
+            "mileage_AVO": "Mileage AVO",
+            "mileage_rAVO": "Mileage rAVO",
+            "trip_AVO": "Trip AVO",
+            "trip_rAVO": "Trip rAVO",
+            "operating_cost": "Operating Cost",
+            "revenue": "Revenue",
+            "assigned_requests": "Assigned Requests",
+            "requests": "Total Requests"
+        }
+        dataset['metric'] = dataset['metric'].replace(replacements)
+        self.fare = dataset[dataset['metric'] == 'Fare'].copy()
+        self.assigned_requests = dataset[dataset['metric'] == 'Assigned Requests'].copy()
+        self.discount_perc_unit_fix=dataset[dataset['metric'] == 'Discount'].copy()
+        self.discount_perc_unit_fix = self.discount_perc_unit_fix.merge(self.fare, on=[col for col in aggregators['ttest_aggregators']+['folder'] if col is not None], how='left', suffixes=('', '_fare'))
+        self.discount_perc_unit_fix["Discount %"]=self.discount_perc_unit_fix["value"]/self.discount_perc_unit_fix["value_fare"]
+        self.discount_perc_unit_fix["value_significance"]=self.discount_perc_unit_fix["Discount %"].apply(lambda x: f"{round(x*100, 1)}% {self.discount_perc_unit_fix['significance level']}")
+        self.pooling_rate_unit_fix=dataset[dataset['metric'] == 'Pooling %'].copy().apply(lambda x: f"{round(x*100, 1)}% {self.discount_perc_unit_fix['significance level']}")
+        self.evmt_unit_fix=dataset[dataset['metric'] == 'eVMT_perc'].copy().apply(lambda x: f"{round(x, 1)}% {self.discount_perc_unit_fix['significance level']}")
+        self.rejected_request_rate_unit_fix=dataset[dataset['metric'] == 'Total Requests'].copy()
+        self.rejected_request_rate_unit_fix = self.rejected_request_rate_unit_fix.merge(self.assigned_requests, on=[col for col in aggregators['ttest_aggregators']+['folder'] if col is not None], how='left', suffixes=('', '_assigned'))
+        self.rejected_request_rate_unit_fix["Rejected Request Rate"]=(self.rejected_request_rate_unit_fix["value"]-self.rejected_request_rate_unit_fix["value_assigned"])/self.rejected_request_rate_unit_fix["value_assigned"]
+        self.tnc_ttests_clean_df = dataset
+        
+
 def create_h5(df_dict,path):
     with pd.HDFStore(path+'/pbix_tables.h5') as store:
         for key, df in df_dict.items():
             store[key] = df
 
+def find_db_path(path, city_names):
+    city_path = {}
+    for city, prefix in city_names.items():
+        db_name = city+'-Supply.sqlite'
+        db_path = find_file_on_drive(folder=path, file_name=db_name)
+        if db_path is None:
+            messagebox.showinfo("Error", f"Could not find {db_name} in {path}. Please enter manually.")
+            db_path = filedialog.askopenfilename('Select the database file for '+city)
+        city_path[city] = db_path
+    return city_path
+            
+def run_all(path,aggregators,city_names,study_name):
+    with tqdm(total=8, desc="Processing", unit="step") as pbar:
+        tqdm.write("Searching for supply databases.")
+        #db_path = find_db_path(path, city_names)
+        db_path = {'campo':'C:\\Users\\jpaul4\\Box\\Research\\Papers\\6_TRB_2025_Papers\\redo cases\\trb_cases_results\\atx_30000_reg\\campo-Supply.sqlite','greenville':'C:\\Users\\jpaul4\\Box\\Research\\Papers\\6_TRB_2025_Papers\\redo cases\\trb_cases_results\\gsc_500_heur_reg\\greenville-Supply.sqlite'}
+        pbar.update(1)
+        path=path.as_posix()
+        tqdm.write("Running transit queries.")
+        queries = transit_queries(path, aggregators)
+        pbar.update(1)
+        tqdm.write("Running mode shift queries.")
+        mode_queries = mode_shift_queries(path,aggregators)
+        pbar.update(1)
+        tqdm.write("Running demographic queries.")
+        demographic_queries_instance = demographic_queries(path,aggregators,db_path, city_names)
+        pbar.update(1)
+        tqdm.write("Running financial queries.")
+        financial_study_instance = financial_study(path,aggregators,demographic_queries_instance)
+        pbar.update(1)
+        tqdm.write("Running t-test queries.")
+        ttest_queries_instance = ttest_queries(path,aggregators)
+        pbar.update(1)
 
-path = r"C:\Users\jpaul4\Desktop\temp\results.h5"
-aggregators = {
-    'Transit Aggregators': ['City', 'Strategy'],
-    'Folder to Columns': ['City', 'Strategy','Fleet Size'],
-    'Demographic Aggregators':['City','age_class'],
-    'Case Aggregators': ['City', 'Fleet Size'],
-    'Strategy Aggregators': ['City', 'Strategy']
-}
-db_path = os.path.dirname(path)
-city_names = {
-    'greenville':'gsc',
-    'campo':'atx'
-}
-queries = transit_queries(path, aggregators)
-mode_queries = mode_shift_queries(path,aggregators)
-demographic_queries_instance = demographic_queries(path,aggregators,db_path, city_names)
-financial_study_instance = financial_study(path,aggregators,demographic_queries_instance)
 
-df_dict = {"trip_avo_histogram_vals":queries.trip_avo_histogram_vals,
-"pattern_avo_histogram_vals":queries.pattern_avo_histogram_vals,
-"transit_pattern_avo_cases_vals":queries.transit_pattern_avo_cases_vals,
-"transit_trip_avo_cases_vals":queries.transit_trip_avo_cases_vals,
-"mode_dist_combo_proactive":mode_queries.mode_dist_combo_proactive,
-"mode_cnt_combo_proactive":mode_queries.mode_cnt_combo_proactive,
-"positive_shift_reg":mode_queries.positive_shift_reg,
-"demographic_df":demographic_queries_instance.demographic_df,
-"hh_inc_map_df":demographic_queries_instance.hh_inc_map_df,
-"hh_inc_map_atx":demographic_queries_instance.hh_inc_map_atx,
-"hh_inc_map_gsc":demographic_queries_instance.hh_inc_map_gsc,
-"hh_inc_hist_df":demographic_queries_instance.hh_inc_hist_df,
-"demo_activity_time_usage_df":demographic_queries_instance.demo_activity_time_usage_df,
-"demo_agg_tnc_case_df":demographic_queries_instance.demo_agg_tnc_case_df,
-"demo_agg_mode_data_df":demographic_queries_instance.demo_agg_mode_data_df,
-"vehicle_ownership_df":demographic_queries_instance.vehicle_ownership_df,
-"closest_stops_by_zone_df":demographic_queries_instance.closest_stops_by_zone_df,
-"vehicle_ownership_df":demographic_queries_instance.vehicle_ownership_df,
-"combined_financial_cases_df":financial_study_instance.combined_financial_cases_df,
-"financial_data_df":financial_study_instance.financial_data_df,
-"pooling_rate_df":financial_study_instance.pooling_rate_df,
-"tnc_summary_df":financial_study_instance.tnc_summary_df,
-"financial_case_data_df":financial_study_instance.financial_case_data_df,
-"demo_financial_case_data_df":financial_study_instance.demo_financial_case_data_df,
-"mode_dist_combo":mode_queries.mode_dist_combo,
-"mode_cnt_combo":mode_queries.mode_cnt_combo
-}
-create_h5(df_dict,db_path)
+        tqdm.write("Copying PBIX into case folder.")
+        df_dict = {"trip_avo_histogram_vals":queries.trip_avo_histogram_vals,
+            "pattern_avo_histogram_vals":queries.pattern_avo_histogram_vals,
+            "transit_pattern_avo_cases_vals":queries.transit_pattern_avo_cases_vals,
+            "transit_trip_avo_cases_vals":queries.transit_trip_avo_cases_vals,
+            "mode_dist_combo_proactive":mode_queries.mode_dist_combo_proactive,
+            "mode_cnt_combo_proactive":mode_queries.mode_cnt_combo_proactive,
+            "positive_shift_reg":mode_queries.positive_shift_reg,
+            "demographic_df":demographic_queries_instance.demographic_df,
+            "hh_inc_map_df":demographic_queries_instance.hh_inc_map_df,
+            "hh_inc_map_atx":demographic_queries_instance.hh_inc_map_atx,
+            "hh_inc_map_gsc":demographic_queries_instance.hh_inc_map_gsc,
+            "hh_inc_hist_df":demographic_queries_instance.hh_inc_hist_df,
+            "demo_activity_time_usage_df":demographic_queries_instance.demo_activity_time_usage_df,
+            "demo_agg_tnc_case_df":demographic_queries_instance.demo_agg_tnc_case_df,
+            "demo_agg_mode_data_df":demographic_queries_instance.demo_agg_mode_data_df,
+            "vehicle_ownership_df":demographic_queries_instance.vehicle_ownership_df,
+            "closest_stops_by_zone_df":demographic_queries_instance.closest_stops_by_zone_df,
+            "vehicle_ownership_df":demographic_queries_instance.vehicle_ownership_df,
+            "combined_financial_cases_df":financial_study_instance.combined_financial_cases_df,
+            "financial_data_df":financial_study_instance.financial_data_df,
+            "pooling_rate_df":financial_study_instance.pooling_rate_df,
+            "tnc_summary_df":financial_study_instance.tnc_summary_df,
+            "financial_case_data_df":financial_study_instance.financial_case_data_df,
+            "demo_financial_case_data_df":financial_study_instance.demo_financial_case_data_df,
+            "mode_dist_combo":mode_queries.mode_dist_combo,
+            "mode_cnt_combo":mode_queries.mode_cnt_combo,
+            "discount_perc_unit_fix":ttest_queries_instance.discount_perc_unit_fix,
+            "pooling_rate_unit_fix":ttest_queries_instance.pooling_rate_unit_fix,
+            "evmt_unit_fix":ttest_queries_instance.evmt_unit_fix,
+            "rejected_request_rate_unit_fix":ttest_queries_instance.rejected_request_rate_unit_fix,
+            "tnc_ttests_w_significance":ttest_queries_instance.tnc_ttests_clean_df
+            }
+        copy_pbix_to_dir(path,study_name)
+        pbar.update(1)
+        tqdm.write("Creating h5 file.")
+        create_h5(df_dict,path)
+        pbar.update(1)
 
-# print(queries.trip_avo_histogram_vals)
-# print(queries.pattern_avo_histogram_vals)
-# print(queries.transit_pattern_avo_cases_vals)
-# print(queries.transit_trip_avo_cases_vals)
-# print(mode_queries.mode_dist_combo_proactive)
-# print(mode_queries.mode_cnt_combo_proactive)
-# print(mode_queries.positive_shift_reg)
-# print(demographic_queries_instance.demographic_df)
-# print(demographic_queries_instance.hh_inc_map_df)
-# print(demographic_queries_instance.hh_inc_map_atx)
-# print(demographic_queries_instance.hh_inc_map_gsc)
-# print(demographic_queries_instance.hh_inc_hist_df)
-# print(demographic_queries_instance.demo_activity_time_usage_df)
-# print(demographic_queries_instance.demo_agg_tnc_case_df)
-# print(demographic_queries_instance.demo_agg_mode_data_df)
-# print(demographic_queries_instance.vehicle_ownership_df)
-# print(demographic_queries_instance.closest_stops_by_zone_df)
-# print(demographic_queries_instance.vehicle_ownership_df)
-# print(financial_study_instance.combined_financial_cases_df)
-# print(financial_study_instance.financial_data_df)
-# print(financial_study_instance.pooling_rate_df)
-# print(financial_study_instance.tnc_summary_df)
-# print(financial_study_instance.financial_case_data_df)
+
+def copy_pbix_to_dir(path, study_name):
+    current_file_path = os.path.abspath(__file__)
+    parent_directory = os.path.dirname(current_file_path)
+    pbix_path = os.path.join(parent_directory, 'Stat_Power_BI.pbix')
+    destination_path = os.path.join(path, f'Stat_Power_BI_{study_name}.pbix')
+    if not os.path.exists(destination_path):
+        shutil.copy(pbix_path, destination_path)
+
+
+
+def find_file_in_directory_old(directory, file_name, timeout_event):
+    for dirpath, dirnames, filenames in os.walk(directory):
+        if timeout_event.is_set():
+            return None, False
+        if file_name in filenames:
+            timeout_event.set()  # Signal other threads to stop
+            return os.path.join(dirpath, file_name), True
+        
+    return None
+
+def get_sub_directories(path):
+    return [os.path.join(path, d) for d in os.listdir(path) if os.path.isdir(os.path.join(path, d))]
+
+def find_file_on_drive(drive_letter=None,folder=None, file_name=None, timeout = 60,pbix_mode = False):
+    root = None
+    try:
+        if drive_letter is None:
+            drive_letter = 'C'
+        if folder is None and file_name is None:
+            root = tk.Tk()
+            messagebox.showinfo("Error", "Please provide either a folder or a file name.")
+            return None
+        elif folder is not None:
+            directories = [os.path.join(folder,dir) for dir in os.listdir(folder.as_posix()) if os.path.isdir(os.path.join(folder,dir))]
+        else:
+            directories = [os.path.join(Path.home(), d) for d in os.listdir(Path.home().as_posix()) if os.path.isdir(os.path.join(Path.home(), d))]
+            
+        checked_dir_length = 0
+        found_folder_length = 0
+        unchecked_dirs = []
+        checked_dirs = []
+        #thread_num = os.cpu_count()+4
+        thread_num = 1
+        while True:
+            timeout_event = threading.Event()
+            with concurrent.futures.ThreadPoolExecutor(max_workers = thread_num) as executor:
+                future_to_directory = {executor.submit(find_file_in_directory, directory, file_name, timeout_event,timeout,checked_dirs,unchecked_dirs): directory for directory in directories}
+                try:
+                    with tqdm(total=len(future_to_directory), desc="Searching for file", unit="directory",leave=False) as pbar:
+                        path = None
+                        for future in concurrent.futures.as_completed(future_to_directory):
+                            result, checked_dirs,checked_dir_length_thread,unchecked_dirs,found_folder_length_thread = future.result()
+                            checked_dir_length += checked_dir_length_thread
+                            found_folder_length += found_folder_length_thread
+                            if result:
+                                timeout_event.set()  # Signal other threads to stop
+                                tqdm.write(f"Found file at: {result} after seaching {checked_dir_length} directories and finding {found_folder_length} new directories.")
+                                path = result
+                                break
+                            else:
+                                directories.remove(checked_dirs)
+                                directories.extend(unchecked_dirs)
+                            pbar.update(1)
+                        if path:
+                            break
+                except concurrent.futures.TimeoutError:
+                    timeout_event.set()
+                    tqdm.write(f"A thread timed out, reorganizing. Checked {checked_dir_length} directories and found {found_folder_length} new directories.")
+    except Exception as e:
+        raise e
+    finally: 
+        if root is not None:
+            root.destroy()
+    if pbix_mode:
+        df = pd.DataFrame({'PBIX Path': [result]})
+        return df
+    else:
+        return result
+
+def find_file_in_directory(directory, file_name, timeout_event, timeout_length, checked_dirs,unchecked_dirs):
+    start_time = time.time()
+    checked_dir_length = 0
+    found_folder_length = 0
+    head = directory
+    unchecked_dirs.extend([os.path.join(head,dir) for dir in  os.listdir(head) if os.path.isdir(os.path.join(head,dir)) and os.path.join(head,dir) not in checked_dirs])
+    print(unchecked_dirs)
+    for dir, subdirs, files in os.walk(r"C:\Users\jpaul4\Box\Research\Papers\6_TRB_2025_Papers",topdown=False):
+        if time.time()-start_time>timeout_length:
+            timeout_event.set()
+            return None, checked_dirs,checked_dir_length,unchecked_dirs,found_folder_length
+        if timeout_event.is_set():
+            return None, checked_dirs,checked_dir_length,unchecked_dirs,found_folder_length
+        if dir in checked_dirs:
+            continue
+        print(dir)
+        print(subdirs)
+        hold_dir = dir
+        if not dir in unchecked_dirs:
+            loop_dirs =[hold_dir]
+            while True:
+                for loop_dir in loop_dirs:
+                    loop_dirs.remove(loop_dir)
+                    parent_dir = os.path.dirname(loop_dir)
+                    if parent_dir == hold_dir:
+                        next
+                    parent_level_dirs = [os.path.join(parent_dir,subdir) for subdir in os.listdir(parent_dir)
+                                         if os.path.isdir(os.path.join(parent_dir,subdir)) and 
+                                         os.path.join(parent_dir,subdir) not in unchecked_dirs and 
+                                         os.path.join(parent_dir,subdir) not in checked_dirs]
+                    if len(parent_level_dirs)>0:
+                        found_folder_length += len(parent_level_dirs)
+                        unchecked_dirs.extend(parent_level_dirs)
+                        print(unchecked_dirs)
+                        loop_dirs = parent_level_dirs
+                if len(loop_dirs)==0:
+                    break
+    
+                    
+                
+           # unchecked_dirs.append(dir)
+        
+        if file_name in files:
+            return os.path.join(dir, file_name), checked_dirs,checked_dir_length,unchecked_dirs,found_folder_length
+        unchecked_dirs.remove(dir)
+        checked_dirs.append(dir)
+        checked_dir_length += 1
+        print(unchecked_dirs)
+
+def open_pbix_file(pbix_path=None, study_name=None):
+    if pbix_path is None:
+        if study_name is None:
+            study_name = input("Enter study name: ")
+        pbix_path = find_file_on_drive('C', f'Stat_Power_BI_{study_name}.pbix', timeout=60)
+    if not pbix_path.as_posix().endswith('.pbix'):
+        pbix_path = os.path.join(pbix_path.as_posix(),f'Stat_Power_BI_{study_name}.pbix')
+    #cmd = f"""\"explorer.exe shell:appsFolder\Microsoft.MicrosoftPowerBIDesktop_8wekyb3d8bbwe!Microsoft.MicrosoftPowerBIDesktop\" \"{pbix_path}\""""
+    cmd = f"Invoke-Item \"{pbix_path}\""
+    p = subprocess.Popen(["powershell", cmd], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    p.communicate()
+
+def create_pbix_path_query(timeout=60):
+    root = tk.Tk()
+    root.overrideredirect(1)
+    root.withdraw()
+    response = messagebox.askyesno("Auto Find PBIX Datasource", "Would you like to attempt to auto find the PBIX Datasource file (This only will work for files saved on a windows \"C\" drive)?")
+    root.destroy()
+    if response:
+        
+        pbix_path = find_file_on_drive(drive_letter='C', file_name='pbix_tables.h5', timeout=timeout, pbix_mode=True)
+        root = tk.Tk()
+        root.overrideredirect(1)
+        root.withdraw()
+        if pbix_path is None:
+            messagebox.showinfo("Timeout", "Search timed out. Please select the PBIX file manually.")
+            pbix_path = filedialog.askopenfilename(filetypes=[("Power BI files", "*.pbix")])
+        else:
+            messagebox.showinfo("Success", "PBIX file found at: " + pbix_path)
+        root.destroy()
+    else:
+        root = tk.Tk()
+        root.overrideredirect(1)
+        root.withdraw()
+        pbix_path = filedialog.askopenfilename(filetypes=[("Power BI files", "*.pbix")])
+        root.destroy()
+    df = pd.DataFrame({'PBIX Path': [pbix_path]})
+    return df

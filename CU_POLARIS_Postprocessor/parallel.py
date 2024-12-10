@@ -18,8 +18,8 @@ def parallel_process_folders(config:PostProcessingConfig):
     folders = [Path(os.path.join(parent_folder, f)) for f in os.listdir(parent_folder) if os.path.isdir(os.path.join(parent_folder, f))]
 
     # Use ThreadPoolExecutor or ProcessPoolExecutor to process folders in parallel
-    #workers = os.cpu_count() + 4
-    workers = 1
+    workers = os.cpu_count() + 4
+    #workers = 1
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
         results = list(executor.map(process_folder, folders, itertools.repeat(config)))
 
@@ -50,10 +50,12 @@ def process_folder(dir, config:PostProcessingConfig):
     #print(f"Opening: {dir}")
     for name in config.db_names:
         if os.path.exists(Path(dir.as_posix() + '/' + name+'-Supply.sqlite')):
-            db_name = name
-            break
+            if os.path.getsize(Path(dir.as_posix() + '/' + name+'-Supply.sqlite')) > 1024:  # Check if the file size is greater than 0
+                db_name = name
+                break
         elif os.path.exists(Path(dir.as_posix() + '/' + name+'-Supply.sqlite.tar.gz')):
-            db_name = name
+            if os.path.getsize(Path(dir.as_posix() + '/' + name+'-Supply.sqlite.tar.gz')) > 1024:  # Check if the file size is greater than 0
+                db_name = name
             break
     
     

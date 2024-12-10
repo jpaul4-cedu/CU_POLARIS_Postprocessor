@@ -21,10 +21,12 @@ def process_nearest_stops(iter_dir, folder, **kwargs):
     LEFT JOIN household b ON a.household = b.household
     LEFT JOIN location c ON b.location = c.location
     GROUP BY b.household, c.x, c.y, c.zone;"""
-    if not os.path.exists(dir.as_posix() + '/Austin-Supply.sqlite'):
+    if os.path.exists(dir.as_posix() + '/Austin-Supply.sqlite'):
+        city = 'Austin'
+    elif os.path.exists(dir.as_posix() + '/Greenville-Supply.sqlite'):
         city =  'greenville'
     else:
-        city = 'Austin'
+        city = 'campo'
 
     read_bus_sql = """select * from transit_stops;"""
     supply_path = f"""attach database "{dir.as_posix() + '/'+city+'-Supply.sqlite'}" as a;"""

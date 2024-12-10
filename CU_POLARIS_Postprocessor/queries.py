@@ -67,7 +67,7 @@ def get_sql_create(supply_db,trip_multiplier,result_db):
     "fare_sensitivity_results": f"""
         CREATE TABLE if not exists fare_sensitivity_results AS SELECT *, t3.evmt * 1.0 / t4.sav_vmt as perc_evmt, t4.sav_vmt * 1.0 / t2.requests_served as vmt_per_r, t6.sav_vht * 60.0 / t2.requests_served as vht_per_r FROM 
         (SELECT count(*) * {trip_multiplier} as fleet_size, avg(tot_dropoffs) as avg_trips FROM TNC_Statistics) as t1,
-        (SELECT avg(pickup_time - request_time)/60 as wait_min, avg(dropoff_time - request_time)/60 as ttime_min, count(*) * 1 as requests_served FROM TNC_Request where assigned_vehicle is not null) as t2,
+        (SELECT avg(pickup_time - request_time)/60 as wait_min, avg(dropoff_time - request_time)/60 as ttime_min, count(*) * {trip_multiplier} as requests_served FROM TNC_Request where assigned_vehicle is not null) as t2,
         (SELECT sum(travel_distance)/1609.34 * {trip_multiplier} as evmt FROM  TNC_Trip where passengers = 0) as t3,
         (SELECT sum(travel_distance)/1609.34 * {trip_multiplier} as sav_vmt FROM TNC_Trip) as t4,
         (SELECT sum(travel_distance * passengers) * 1.0 / sum(travel_distance ) as AVO FROM TNC_Trip) as t5,
@@ -227,7 +227,8 @@ def get_sql_create(supply_db,trip_multiplier,result_db):
         tnc_request_id,
         (pickup_time-request_time)/60 as wait_min, 
         (dropoff_time-pickup_time)/60 as ttime, 
-        discount*{trip_multiplier} as discount, 
+        discount as discount_perc, 
+        (discount*fare)*{trip_multiplier} as discount,
         fare*{trip_multiplier} as fare,
         case when (max_pass - party_size) > 0 then 1 else 0 end as pooled,
         eVMT_perc,
