@@ -1609,9 +1609,11 @@ class ttest_queries():
         self.discount_perc_unit_fix=dataset[dataset['metric'] == 'Discount'].copy()
         self.discount_perc_unit_fix = self.discount_perc_unit_fix.merge(self.fare, on=[col for col in aggregators['ttest_aggregators']+['folder'] if col is not None], how='left', suffixes=('', '_fare'))
         self.discount_perc_unit_fix["Discount %"]=self.discount_perc_unit_fix["value"]/self.discount_perc_unit_fix["value_fare"]
-        self.discount_perc_unit_fix["value_significance"]=self.discount_perc_unit_fix["Discount %"].apply(lambda x: f"{round(x*100, 1)}% {self.discount_perc_unit_fix['significance level']}")
-        self.pooling_rate_unit_fix=dataset[dataset['metric'] == 'Pooling %'].copy().apply(lambda x: f"{round(x*100, 1)}% {self.discount_perc_unit_fix['significance level']}")
-        self.evmt_unit_fix=dataset[dataset['metric'] == 'eVMT_perc'].copy().apply(lambda x: f"{round(x, 1)}% {self.discount_perc_unit_fix['significance level']}")
+        self.discount_perc_unit_fix["value_significance"] = self.discount_perc_unit_fix.apply(lambda row: f"{round(row['Discount %']*100, 1)}% {row['significance level']}", axis=1)
+        self.pooling_rate_unit_fix=dataset[dataset['metric'] == 'Pooling %'].copy()
+        self.pooling_rate_unit_fix['value_significance']=self.pooling_rate_unit_fix.apply(lambda row: f"{round(row['value']*100, 1)}% {row['significance level']}", axis=1)
+        self.evmt_unit_fix=dataset[dataset['metric'] == 'eVMT_perc'].copy()
+        self.evmt_unit_fix['value_significance']=self.evmt_unit_fix.apply(lambda row: f"{round(row['value']*100, 1)}% {row['significance level']}", axis=1)
         self.rejected_request_rate_unit_fix=dataset[dataset['metric'] == 'Total Requests'].copy()
         self.rejected_request_rate_unit_fix = self.rejected_request_rate_unit_fix.merge(self.assigned_requests, on=[col for col in aggregators['ttest_aggregators']+['folder'] if col is not None], how='left', suffixes=('', '_assigned'))
         self.rejected_request_rate_unit_fix["Rejected Request Rate"]=(self.rejected_request_rate_unit_fix["value"]-self.rejected_request_rate_unit_fix["value_assigned"])/self.rejected_request_rate_unit_fix["value_assigned"]

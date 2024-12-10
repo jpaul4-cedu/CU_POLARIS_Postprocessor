@@ -59,7 +59,7 @@ def run_pbix(config_wtp:PostProcessingConfig):
 def __main__():
     config_wtp=PostProcessingConfig(base_dir=Path(r"C:\Users\jpaul4\Box\Research\Papers\5_Mode Choice Paper\redo cases\mode_choice_cases_results"),
                                     output_h5=True,fresh_start=False,reset_csvs=True,reset_sql=True,reset_stops=False, db_names=['greenville','campo'])
-    run_anal(config_wtp)
+    #run_anal(config_wtp)
     run_pbix(config_wtp)
    # pbix_charting.create_pbix_path_query()
 
