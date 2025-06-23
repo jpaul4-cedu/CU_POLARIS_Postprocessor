@@ -35,6 +35,16 @@ def process_folder_names_cit_fleet_strat(config:PostProcessingConfig):
     results={}
     for key, value in config.results.items():
         df = value
+        #skip if no rows in the dataframe
+        if df.empty:
+            warnings.warn(f"No data found for {key}. Skipping folder name processing.")
+            #add a city and fleet size column to the dataframe
+            df['City'] = 'N/A'
+            df['Fleet Size'] = 'N/A'
+            df['Strategy'] = 'N/A'
+            df['Iteration'] = 'N/A'
+            results[key]=df
+            continue
         print(f"Creating case columns for {key}.")
             # Split the 'folder' column by '_'
         df[['folder_1', 'folder_2']] = df['folder'].str.split('_', n=1, expand=True)

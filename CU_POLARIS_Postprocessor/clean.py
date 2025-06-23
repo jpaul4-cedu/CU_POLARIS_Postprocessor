@@ -7,6 +7,7 @@ import glob
 from CU_POLARIS_Postprocessor.config import PostProcessingConfig
 import tkinter as tk
 from tkinter import messagebox
+import shutil
 
 
 def clean_analysis(config:PostProcessingConfig):
@@ -60,8 +61,11 @@ def clean_analysis(config:PostProcessingConfig):
             subprocess.check_output(cmd, shell=True, encoding="utf-8")
     
         if not os.path.exists(supply_db):
-            cmd = f" tar xf {supply_db}.tar.gz"
-            subprocess.check_output(cmd, shell=True, encoding="utf-8")
+            if not os.path.exists(dir.parent.as_posix() + '/' + supply_db):
+                cmd = f" tar xf {supply_db}.tar.gz"
+                subprocess.check_output(cmd, shell=True, encoding="utf-8")
+            else:
+                shutil.copyfile(dir.parent.as_posix() + '/' + supply_db, supply_db)
         
         
         if config.reset_sql:   

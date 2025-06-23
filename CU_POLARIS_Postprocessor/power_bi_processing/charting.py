@@ -429,14 +429,25 @@ class mode_shift_queries():
 
         # Expand Pivot MDA Distances columns
         mda_columns = ["SOV", "BUS", "RAIL", "BICYCLE", "WALK", "TAXI", "FAIL_REROUTE"]
+        # allow for some of the mode columns to be missing
+        mda_columns_existing = [col for col in mda_columns if col in dist.columns and col in cnt.columns]
+        if len(mda_columns_existing) != len(mda_columns):
+            missing_columns = set(mda_columns) - set(mda_columns_existing)
+            for col in missing_columns:
+                dist[col] = 0
+                cnt[col] = 0
         dist[mda_columns] = dist[mda_columns]
         cnt[mda_columns] = cnt[mda_columns]
 
         # Change column types
+        #allow for some of the mode columns to be missing
+        
         dist["RAIL"] = dist["RAIL"].fillna(0).astype(int)
         cnt["RAIL"] = cnt["RAIL"].fillna(0).astype(int)
         dist["BUS"] = dist["BUS"].fillna(0).astype(int)
         cnt["BUS"] = cnt["BUS"].fillna(0).astype(int)
+        
+        # if missing columns, return
 
         # Rename columns
         dist.rename(columns={
@@ -636,6 +647,7 @@ class mode_shift_queries():
 
     def run_mode_shift_queries(self,path,aggregators):
         self.load_tables(path)
+        #check is the tables have the rail
         dist_combo,cnt_combo=self.mode_combo(aggregators=aggregators)
         self.mode_cnt_combo = cnt_combo
         self.mode_dist_combo = dist_combo
@@ -1104,6 +1116,13 @@ class demographic_queries():
         
         # Group rows by specified columns and calculate sum of various columns
         group_cols = [col for col in aggregators['Folder to Columns'] if col is not None] + ['type']
+        
+        #make sure the columns are present in the merged_data
+        required_cols = ['duration', 'SOV_Travel Time', 'SOV_Trips', 'TAXI_Travel Time', 'TAXI_Trips',
+                        'BUS_Travel Time', 'BUS_Trips', 'RAIL_Travel Time', 'RAIL_Trips']
+        for col in required_cols:
+            if col not in merged_data.columns:
+                merged_data[col] = 0
         grouped_rows = merged_data.groupby(group_cols).agg({
             'duration': 'sum',
             'SOV_Travel Time': 'sum',
@@ -1252,6 +1271,9 @@ class demographic_queries():
 
     def vehicle_ownership(self, path, aggregators):
         vo = load_h5_table(path,'fare_sensitivity_results_vo')
+        if vo is None or self.hh_inc_map_df.empty:
+            self.vehicle_ownership_df = pd.DataFrame()
+            return
         grouped_rows = vo.groupby(['City', 'zone']).agg({
         'households': 'sum',
         'vo': 'sum'
@@ -1636,11 +1658,13 @@ def find_db_path(path, city_names):
         city_path[city] = db_path
     return city_path
             
-def run_all(path,aggregators,city_names,study_name):
+def run_all(path,aggregators,city_names,study_name, db_path=None):
     with tqdm(total=8, desc="Processing", unit="step") as pbar:
         tqdm.write("Searching for supply databases.")
         #db_path = find_db_path(path, city_names)
-        db_path = {'campo':'C:\\Users\\jpaul4\\Box\\Research\\Papers\\6_TRB_2025_Papers\\redo cases\\trb_cases_results\\atx_30000_reg\\campo-Supply.sqlite','greenville':'C:\\Users\\jpaul4\\Box\\Research\\Papers\\6_TRB_2025_Papers\\redo cases\\trb_cases_results\\gsc_500_heur_reg\\greenville-Supply.sqlite'}
+        if db_path is None:
+            db_path = {'campo':'C:\\Users\\jpaul4\\Box\\Research\\Papers\\6_TRB_2025_Papers\\redo cases\\trb_cases_results\\atx_30000_reg\\campo-Supply.sqlite','greenville':'C:\\Users\\jpaul4\\Box\\Research\\Papers\\6_TRB_2025_Papers\\redo cases\\trb_cases_results\\gsc_500_heur_reg\\greenville-Supply.sqlite'}
+        
         pbar.update(1)
         path=path.as_posix()
         tqdm.write("Running transit queries.")
@@ -1656,7 +1680,7 @@ def run_all(path,aggregators,city_names,study_name):
         financial_study_instance = financial_study(path,aggregators,demographic_queries_instance)
         pbar.update(1)
         tqdm.write("Running t-test queries.")
-        ttest_queries_instance = ttest_queries(path,aggregators)
+       # ttest_queries_instance = ttest_queries(path,aggregators)
         pbar.update(1)
 
 
@@ -1687,11 +1711,11 @@ def run_all(path,aggregators,city_names,study_name):
             "demo_financial_case_data_df":financial_study_instance.demo_financial_case_data_df,
             "mode_dist_combo":mode_queries.mode_dist_combo,
             "mode_cnt_combo":mode_queries.mode_cnt_combo,
-            "discount_perc_unit_fix":ttest_queries_instance.discount_perc_unit_fix,
-            "pooling_rate_unit_fix":ttest_queries_instance.pooling_rate_unit_fix,
-            "evmt_unit_fix":ttest_queries_instance.evmt_unit_fix,
-            "rejected_request_rate_unit_fix":ttest_queries_instance.rejected_request_rate_unit_fix,
-            "tnc_ttests_w_significance":ttest_queries_instance.tnc_ttests_clean_df
+          #  "discount_perc_unit_fix":ttest_queries_instance.discount_perc_unit_fix,
+            #"pooling_rate_unit_fix":ttest_queries_instance.pooling_rate_unit_fix,
+            #"evmt_unit_fix":ttest_queries_instance.evmt_unit_fix,
+            #"rejected_request_rate_unit_fix":ttest_queries_instance.rejected_request_rate_unit_fix,
+           # "tnc_ttests_w_significance":ttest_queries_instance.tnc_ttests_clean_df
             }
         copy_pbix_to_dir(path,study_name)
         pbar.update(1)

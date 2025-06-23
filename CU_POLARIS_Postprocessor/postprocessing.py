@@ -2,7 +2,7 @@ import os
 import sqlite3
 import pandas as pd
 import numpy as np
-from .utils import get_timeperiods, get_tnc_pricing, get_heur_discount
+from .utils import get_timeperiods, get_tnc_pricing, get_heur_discount, get_repositioning_interval
 import openmatrix as omx
 from CU_POLARIS_Postprocessor.config import PostProcessingConfig
 from CU_POLARIS_Postprocessor.utils import get_scale_factor
@@ -25,6 +25,8 @@ def process_nearest_stops(iter_dir, folder, **kwargs):
         city = 'Austin'
     elif os.path.exists(dir.as_posix() + '/Greenville-Supply.sqlite'):
         city =  'greenville'
+    elif os.path.exists(dir.as_posix() + '/Bloomington-Supply.sqlite'):
+        city = 'Bloomington'
     else:
         city = 'campo'
 
@@ -330,7 +332,8 @@ def process_demo_financial_case_data(iter_dir, demand_db, result_db, request_fil
 
         
     dir_name = os.path.split(os.path.split(iter_dir.absolute())[0])[1]
-    req_df = pd.read_csv(iter_dir.as_posix()+'/'+request_file_name).assign(folder=dir_name+'_7')
+    iteration_num = iter_dir.name.split('_')[-1]
+    req_df = pd.read_csv(iter_dir.as_posix()+'/'+request_file_name).assign(folder=dir_name+ f'_{iteration_num}')
     req_df['pay_1_a_calc'] = req_df['skim_dist']*per_mile_min+req_df['skim_time']*per_min_min
     req_df['pay_1_a_act']=req_df['pay_1_a_calc'].apply(lambda x: x if x >= 5 else 5)
     #get the fare for case 1 from the request summary row
@@ -344,7 +347,7 @@ def process_demo_financial_case_data(iter_dir, demand_db, result_db, request_fil
     
     req_df.loc[req_df["pooled_service"]==1,'op3']=req_df['skim_dist']*op_cost_saev_p
     req_df.loc[req_df["pooled_service"]!=1,'op3']=req_df['skim_dist']*op_cost_saev_np
-
+    iteration_num = iter_dir.name.split('_')[-1]
 
 
     req_sum_df = req_df.groupby(['age_class','origin_zone']).apply(lambda x: pd.Series({
@@ -362,10 +365,89 @@ def process_demo_financial_case_data(iter_dir, demand_db, result_db, request_fil
     'revenue per request': x['corrected fare'].sum() * trip_multiplier / fleet_size['requests'].iloc[0],
     'revenue_minutes_traveled': rev_vht_vmt['revenue_minutes_traveled'].iloc[0],  # Extract scalar value
     'revenue_miles_traveled': rev_vht_vmt['revenue_miles_traveled'].iloc[0],  # Extract scalar value
-    'folder': dir_name + '_7'
+    'folder': dir_name + f'_{iteration_num}',
     })).reset_index()
 
 
     req_case_sum = pd.concat([req_case_sum,req_sum_df])
     req_case_sum['uber take']=req_case_sum['total_fare']*uber_take
     return req_case_sum
+
+def process_tnc_repositioning_success_rate(iter_dir, demand_db, supply_db, result_db, folder, trip_multiplier, config, **kwargs):
+    #get the trips df
+    iteration_num = iter_dir.name.split('_')[-1]
+    dir_name = os.path.split(os.path.split(iter_dir.absolute())[0])[1] + f'_{iteration_num}'
+    repo_interval = get_repositioning_interval(iter_dir, config)
+    query = f"""select 
+                a.vehicle, 
+                b.zone as origin_zone, 
+                c.zone as destination_zone,
+                a.start,
+                cast (a.start/3600 as int) as hour,
+                cast (a.start/{repo_interval} as int) as repositioning_period,
+                a.init_status
+                from 
+                tnc_trip a 
+                left join location b 
+                on a.origin = b.location 
+                left join location c
+                on a.destination = c.location;"""
+    
+    with sqlite3.connect(iter_dir.as_posix() + '/'+ demand_db) as conn:
+        conn.cursor().executescript(f"""attach database '{iter_dir.as_posix()+'/'+supply_db}' as a;""");
+        trips_df = pd.read_sql(query, conn)
+
+    # Ensure trips are sorted
+    trips_df = trips_df.sort_values(by=["vehicle", "start"])
+
+    # Separate repositioning and service trips
+    repositioning = trips_df[trips_df["init_status"] == -3].copy()
+    service_trips = trips_df[trips_df["init_status"] != -3].copy()
+
+    #if repositioning is empty, return an empty DataFrame
+    if repositioning.empty:
+        return pd.DataFrame(columns=["hour", "num_repositioned", "num_successful", "success_rate"])
+    
+    hour_grouped = repositioning.groupby("hour")
+
+    results = []
+
+    for hour, group in hour_grouped:
+        success_count = 0
+        total_count = 0
+
+        for _, rep_row in group.iterrows():
+            vehicle_id = rep_row["vehicle"]
+            rep_end_time = rep_row["start"]
+            dest_zone = rep_row["destination_zone"]
+
+            # Get next trip by vehicle within 1 hour
+            future_trips = service_trips[
+                (service_trips["vehicle"] == vehicle_id) &
+                (service_trips["start"] > rep_end_time) &
+                (service_trips["start"] <= rep_end_time + 3600)
+            ].sort_values(by="start")
+
+            total_count += 1
+            if not future_trips.empty:
+                next_trip = future_trips.iloc[0]
+                if next_trip["origin_zone"] == dest_zone:
+                    success_count += 1
+
+        success_rate = success_count / total_count if total_count > 0 else 0
+        results.append({
+            "hour": hour,
+            "num_repositioned": total_count,
+            "num_successful": success_count,
+            "success_rate": success_rate
+        })
+
+    # Create a summary dataframe
+    summary_df = pd.DataFrame(results)
+    summary_df['folder'] = dir_name
+
+    # Optional: sort by hour
+    return summary_df.sort_values(by="hour").reset_index(drop=True)
+    
+    
+    

@@ -21,7 +21,7 @@ class PostProcessingConfig:
                  csvs=None,
                  results=None,
                  unique_folders=None,
-                 output_h5=False):
+                 output_h5=False, parallel=True):
         
         self.fresh_start = fresh_start
         self.do_closest_stops = do_closest_stops
@@ -29,6 +29,7 @@ class PostProcessingConfig:
         self.reset_csvs = reset_csvs
         self.reset_stops = reset_stops
         self.force_skims = force_skims
+        self.parallel = parallel
         
         self.base_dir = base_dir
         self.sql_tables = sql_tables if sql_tables is not None else []
@@ -46,7 +47,8 @@ class PostProcessingConfig:
             "closest_stops":("process_nearest_stops", {}),
             "tnc_skim_demo":("process_elder_request_agg", {}),
             "tnc_stat_summary":("process_tnc_stat_summary",{}),
-            "demo_financial_case_data":("process_demo_financial_case_data",{})
+            "demo_financial_case_data":("process_demo_financial_case_data",{}),
+            "repositioning_success_rate":("process_tnc_repositioning_success_rate", {})
         }
         
         self.desired_outputs = desired_outputs if desired_outputs is not None else {
@@ -72,6 +74,7 @@ class PostProcessingConfig:
             'closest_stops':'postprocessing',
             'tnc_stat_summary_helper':'postprocessing_helper',
             'tnc_stat_summary':'postprocessing',
+            'repositioning_success_rate':'postprocessing',
             'tnc_skim_demo':'postprocessing',
             'tnc_stat_summary_helper':'sql_helper',
             'demo_financial_case_data':'postprocessing',

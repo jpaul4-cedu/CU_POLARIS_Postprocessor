@@ -9,8 +9,9 @@ import sqlite3
 from .config import PostProcessingConfig
 import pandas as pd
 import itertools
+import shutil
 import json
-from .postprocessing import process_batch_nearest_stops, process_elder_request_agg, process_nearest_stops, process_solo_equiv_fare, process_tnc_stat_summary, process_demo_financial_case_data
+from .postprocessing import process_batch_nearest_stops, process_elder_request_agg, process_nearest_stops, process_solo_equiv_fare, process_tnc_stat_summary, process_demo_financial_case_data, process_tnc_repositioning_success_rate
 
 def parallel_process_folders(config:PostProcessingConfig):
     # Get a list of all subfolders in the parent folder
@@ -20,8 +21,12 @@ def parallel_process_folders(config:PostProcessingConfig):
     # Use ThreadPoolExecutor or ProcessPoolExecutor to process folders in parallel
     workers = os.cpu_count() + 4
     #workers = 1
-    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-        results = list(executor.map(process_folder, folders, itertools.repeat(config)))
+
+    if config.parallel:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+            results = list(executor.map(process_folder, folders, itertools.repeat(config)))
+    else:
+        results = [process_folder(folder, config) for folder in folders]
 
     collected_results={}
 
@@ -49,6 +54,8 @@ def process_folder(dir, config:PostProcessingConfig):
     #dir = Path(dir.as_posix())
     #print(f"Opening: {dir}")
     for name in config.db_names:
+
+        
         if os.path.exists(Path(dir.as_posix() + '/' + name+'-Supply.sqlite')):
             if os.path.getsize(Path(dir.as_posix() + '/' + name+'-Supply.sqlite')) > 1024:  # Check if the file size is greater than 0
                 db_name = name
@@ -57,6 +64,11 @@ def process_folder(dir, config:PostProcessingConfig):
             if os.path.getsize(Path(dir.as_posix() + '/' + name+'-Supply.sqlite.tar.gz')) > 1024:  # Check if the file size is greater than 0
                 db_name = name
             break
+        #if not found, get supply db from parent folder
+        elif os.path.exists(Path(dir.parent.as_posix() + '/' + name+'-Supply.sqlite')):
+            if os.path.getsize(Path(dir.parent.as_posix() + '/' + name+'-Supply.sqlite')) > 1024:
+                db_name = name
+                break
     
     
     demand_db = db_name + "-Demand.sqlite"
@@ -76,8 +88,12 @@ def process_folder(dir, config:PostProcessingConfig):
             tar.extractall(path = dir)
 
     if not os.path.exists(dir.as_posix() + '/'+ supply_db):
-        with tarfile.open(dir.as_posix()+'/' + supply_db + '.tar.gz','r:gz') as tar:
-            tar.extractall(path = dir)
+        if os.path.exists(dir.parent.as_posix() + '/'+ supply_db):
+            #copy supply db from parent folder
+            shutil.copyfile(dir.parent.as_posix() + '/'+ supply_db, dir.as_posix() + '/'+ supply_db)
+        else:
+            with tarfile.open(dir.as_posix()+'/' + supply_db + '.tar.gz','r:gz') as tar:
+                tar.extractall(path = dir)
 
 
     queries = get_sql_create(supply_db=dir.as_posix() + '/'+ supply_db,trip_multiplier=trip_multiplier,result_db=dir.as_posix() + '/'+result_db)

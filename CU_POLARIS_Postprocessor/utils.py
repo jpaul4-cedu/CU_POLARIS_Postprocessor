@@ -101,12 +101,16 @@ def get_scale_factor(dir, config:PostProcessingConfig):
     
     # Extract the traffic scale factor
     tsf = scenario["Population synthesizer controls"]["traffic_scale_factor"]
-    fleet_size = saev_fleet_model["Operator_1"]["Fleet_Base"]["Operator_1_TNC_FLEET_SIZE"]
+    try:
+        fleet_size = saev_fleet_model["Operator_1"]["Fleet_Base"]["Operator_1_TNC_FLEET_SIZE"]
+    except KeyError:
+        fleet_size = saev_fleet_model["Operator_1"]["Fleet_Base"]["TNC_FLEET_SIZE"]
     # Extract the directory name
     dir_name = os.path.split(os.path.split(dir.absolute())[0])[1]
     
     # Create a DataFrame for the current folder
-    dt_df = pd.DataFrame({'traffic scale factor': [tsf],"fleet size":[fleet_size], 'folder': [dir_name + '_7']})
+    iteration_num = dir.name.split('_')[-1]
+    dt_df = pd.DataFrame({'traffic scale factor': [tsf],"fleet size":[fleet_size], 'folder': [dir_name + f'_{iteration_num}']})
     
     # Concatenate the new DataFrame with the main DataFrame
     df = pd.concat([df, dt_df], ignore_index=True)
@@ -160,7 +164,27 @@ def get_tnc_pricing(dir, config:PostProcessingConfig):
     per_mile = scenario["Scenario controls"]["rideshare_cost_per_mile"]
     base = scenario["Scenario controls"]["rideshare_base_fare"]
     return per_minute,per_mile,base
- 
+
+def get_repositioning_interval(dir, config:PostProcessingConfig):
+
+    # Set current working directory
+    
+    # Paths to JSON files
+    for scen in config.fleet_model_file_names:
+        if os.path.exists(Path(dir.as_posix() + "/model_files/" + scen)):
+            scen_path = Path(dir.as_posix() + "/model_files/" + scen)
+            break
+    
+    with open(scen_path, 'r') as file:
+        scenario = json.load(file)
+    
+    #Extract the repositioning interval
+    interval = scenario["DRS_Discount_AR"]["repositioning_batched_interval_seconds"]
+    if interval is None:
+        interval = 900
+
+    return interval
+
 def get_heur_discount(dir):
 
     # Set current working directory
