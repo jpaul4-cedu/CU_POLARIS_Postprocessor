@@ -236,7 +236,7 @@ def check_value_in_list(value, lst, delimiter="_"):
 
 def update_scenario_file(scenario_file:str,full_path:str, val:Union[int,str,float], target:list = []):
     if os.path.exists(scenario_file):
-        shutil.copy(scenario_file,os.path.join(full_path,os.path.splitext(os.path.basename(scenario_file))[0]+'_backup.json'))
+        shutil.copy(scenario_file,os.path.join(os.path.dirname(scenario_file),os.path.splitext(os.path.basename(scenario_file))[0]+'_backup.json'))
         with open(scenario_file, 'r') as file:
             scenario = json.load(file)
         
@@ -385,14 +385,20 @@ def copy_cases(new_case_path, case_path = '', move_cases: bool = True, new_cases
         type = "copy"
         items =[]
         
-        case_prefix = os.path.basename(case_path)
         
+        case_prefix = os.path.basename(case_path)
+        if "_" in case_prefix:
+            case_prefix = case_prefix.split("_")[0]
+
         all_vars = []
         for case_var in new_cases:
             vars = case_var.values
             all_vars.append(vars)
         
-        combinations = list(itertools.product(*all_vars))
+        if len(new_cases)>1:
+            combinations = list(itertools.product(*all_vars))
+        else:
+            combinations = [all_vars]
         suffixes = []
         all_vals = []
         for combination in combinations:
@@ -411,10 +417,32 @@ def copy_cases(new_case_path, case_path = '', move_cases: bool = True, new_cases
                     pass
                 else:
                     os.makedirs(os.path.join(new_case_path,fold))
-            for file in os.listdir(case_path):
-                file_path = os.path.join(case_path,file)
-                if os.path.isfile(file_path):
-                    if os.path.isfile(os.path.join(new_case_path,fold,file)) and not skip:
+            
+            file_paths = []
+            for root, dirs, files in os.walk(case_path):
+                # Skip any directory with "iteration" in its name
+                if "iteration" in root.lower() or root.startswith("."):
+                    continue
+
+                for file in files:
+                    if file.startswith("."):
+                        continue
+                    # Full original path
+                    src_path = os.path.join(root, file)
+                    
+                    # Relative path from the source root
+                    rel_path = os.path.relpath(src_path, case_path)
+                    # Destination full path
+                    dest_path = os.path.join(os.path.join(new_case_path,fold), rel_path)
+                    file_paths.append((src_path,dest_path))
+                    # Ensure the destination directory exists
+                    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+
+            
+            
+            for file_path in file_paths:
+                if os.path.isfile(file_path[0]):
+                    if os.path.isfile(file_path[1]) and not skip:
                         if not copy:
                             continue
                         resp = input(f"File {file} already exists in {os.path.join(new_case_path,fold)}. Continue (c for continue without copying)?[y/n/c]")
@@ -435,8 +463,8 @@ def copy_cases(new_case_path, case_path = '', move_cases: bool = True, new_cases
                             quit()
                                 
             
-                    move = (file_path,os.path.join(new_case_path,fold,file))
-                    items.append(move)
+                    
+                    items.append(file_path)
         moves[type] = items                       
 
     elif keep_files != [] and case_path !='': #copy some files from a primary source folder but keep some of the case files
@@ -485,7 +513,8 @@ def copy_cases(new_case_path, case_path = '', move_cases: bool = True, new_cases
     
     if len(moves) > 0:
         copy_tasks, del_tasks = create_tasks(moves)
-        run_tasks(parallel,copy_tasks,del_tasks)
+        if len(copy_tasks)>0 or len(del_tasks)>0:
+            run_tasks(parallel,copy_tasks,del_tasks)
     if new_cases != []:
         update_new_scenarios(new_cases, combinations, new_case_path, folds)
 
