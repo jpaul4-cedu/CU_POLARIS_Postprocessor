@@ -38,9 +38,9 @@ def select_file():
 
 
 class CaseVariableData:
-    def __init__(self, variable_name:str, scenario_file:str, json_target:list, values:list, value_key:dict = None):
+    def __init__(self, variable_name:str, scenario_files, json_target:list, values:list, value_key:dict = None):
         self.var_name = variable_name
-        self.scenario_file = scenario_file
+        self.scenario_file = scenario_files
         self.json_target = json_target
         self.values = values
         self.value_key = value_key
@@ -63,14 +63,17 @@ def fxn():
 fxn()
 
 def get_highest_iteration_folder(base_folder):
-    pattern = re.compile(r'^(.*)_iteration_(\d+)$')
-    highest_n = -1
+    pattern = re.compile(r'^(.*)_iteration_(\d+)?$')
+    highest_n = -2
     iter_folder = None
 
     for folder_name in os.listdir(base_folder):
         match = pattern.match(folder_name)
         if match:
-            n = int(match.group(2))
+            try:
+                n = int(match.group(2))
+            except:
+                n = -1
             if n > highest_n:
                 highest_n = n
                 iter_folder = Path(os.path.join(base_folder, folder_name))
@@ -78,6 +81,18 @@ def get_highest_iteration_folder(base_folder):
     return iter_folder
 
 def get_scale_factor(dir, config:PostProcessingConfig):
+    if not isinstance(dir,Path):
+        dir = Path(dir)
+    scale, fleet = get_scale_factor_and_fleet_size(dir,config)
+    return scale
+
+def get_fleet_size(dir, config:PostProcessingConfig):
+    if not isinstance(dir,Path):
+        dir = Path(dir)
+    scale, fleet = get_scale_factor_and_fleet_size(dir,config)
+    return fleet
+
+def get_scale_factor_and_fleet_size(dir, config:PostProcessingConfig):
     df = pd.DataFrame() 
     # Set current working directory
     for scen in config.scenario_file_names:
@@ -115,15 +130,15 @@ def get_scale_factor(dir, config:PostProcessingConfig):
     # Concatenate the new DataFrame with the main DataFrame
     df = pd.concat([df, dt_df], ignore_index=True)
     unique_values = df["traffic scale factor"].unique()
+    unique_fleet = df["fleet size"].unique()
     #if len(unique_values)!=1:
      #   raise ValueError("There are mismatched traffic scale factors in your data set. Please validate.")
     traffic_scale_factor = unique_values[0]
     trip_multiplier = 1/traffic_scale_factor
-    return trip_multiplier
+    return trip_multiplier, unique_fleet[0]
 
 def get_timeperiods(dir):
-    time_perios_loc=Path(dir.as_posix() + '/highway_skim_file.omx')
-    try:
+    def _process_omx(time_perios_loc): 
         with omx.open_file(time_perios_loc, 'r') as omx_file:
         # List all the matrices in the OMX file
         
@@ -140,10 +155,16 @@ def get_timeperiods(dir):
                 metric = omx_file[name].attrs.metric.decode('utf-8')
                 if metric == 'time':
                     timeperiods.append(timeperiod)
+        return timeperiods
+    
+    
+    try:
+        time_perios_loc=Path(dir.as_posix() + '/highway_skim_file.omx')
+        timeperiods = _process_omx(time_perios_loc)
+
     except AttributeError as e:
-            print(f"{e} attribute error in omx {dir}")
-            omx_file.close()
-            raise
+        time_perios_loc=Path(dir.parent.as_posix() + '/highway_skim_file.omx')
+        timeperiods = _process_omx(time_perios_loc)
     return timeperiods
 
 def get_tnc_pricing(dir, config:PostProcessingConfig):
@@ -234,32 +255,39 @@ def check_value_in_list(value, lst, delimiter="_"):
         raise ValueError(f"Value '{value}' not found in the list after splitting by the last '{delimiter}'")
     return True
 
-def update_scenario_file(scenario_file:str,full_path:str, val:Union[int,str,float], target:list = []):
-    if os.path.exists(scenario_file):
-        shutil.copy(scenario_file,os.path.join(os.path.dirname(scenario_file),os.path.splitext(os.path.basename(scenario_file))[0]+'_backup.json'))
-        with open(scenario_file, 'r') as file:
-            scenario = json.load(file)
-        
-        current = scenario
-        #check if the target is in the scenario file
-        for key in target[:-1]:
-            if key not in current:
-                resp = input(f"Key {key} not found in {scenario_file}. Continue?[y/n]")
-                if resp.lower() == 'y':
-                    current[key] = {}
-                else:
-                    print("Stopping the process.")
-                    quit()
-                
-            current = current[key]
-        current[target[-1]] = val
-        #['Operator_1']['Fleet_Base']['Operator_1_TNC_MAX_WAIT_TIME']
-
-        with open(scenario_file, 'w') as file:
-            json.dump(scenario,file,indent=4)
-        
+def update_scenario_file(scenario_file,full_path:str, val:Union[int,str,float], target:list = []):
+    if isinstance(scenario_file,str):
+        scenario_files = [scenario_file]
+    elif isinstance(scenario_file,list):
+        scenario_files = scenario_file
     else:
-        warnings.warn(f"Scenario file {scenario_file} not found in {full_path}.")
+        raise TypeError("Unhandled input type.")
+    for scenario_file in scenario_files:
+        if os.path.exists(scenario_file):
+            shutil.copy(scenario_file,os.path.join(os.path.dirname(scenario_file),os.path.splitext(os.path.basename(scenario_file))[0]+'_backup.json'))
+            with open(scenario_file, 'r') as file:
+                scenario = json.load(file)
+            
+            current = scenario
+            #check if the target is in the scenario file
+            for key in target[:-1]:
+                if key not in current:
+                    resp = input(f"Key {key} not found in {scenario_file}. Continue?[y/n]")
+                    if resp.lower() == 'y':
+                        current[key] = {}
+                    else:
+                        print("Stopping the process.")
+                        quit()
+                    
+                current = current[key]
+            current[target[-1]] = val
+            #['Operator_1']['Fleet_Base']['Operator_1_TNC_MAX_WAIT_TIME']
+
+            with open(scenario_file, 'w') as file:
+                json.dump(scenario,file,indent=4)
+            
+        else:
+            warnings.warn(f"Scenario file {scenario_file} not found in {full_path}.")
 
 def check_scenario_file(scenario_file:str,full_path:str, target:list = []):
     if os.path.exists(scenario_file):
@@ -284,11 +312,11 @@ def check_scenario_file(scenario_file:str,full_path:str, target:list = []):
     else:
         warnings.warn(f"Scenario file {scenario_file} not found in {full_path}.")
 
-def bulk_update_scenario_files(target:list, val, folder_path:Path = os.getcwd(), scenario_names: list = ['scenario_abm.json']):
+def bulk_update_scenario_files(target:list,city:str, val, folder_path:Path = os.getcwd(), scenario_names: list = ['scenario_abm.json']):
     updates = []
     for folder in os.listdir(folder_path):
         full_path = os.path.join(folder_path,folder)
-        if os.path.exists(full_path):
+        if os.path.exists(full_path) and city in folder:
             for scen_file in scenario_names:
                 scenario_file = os.path.join(full_path,scen_file)
                 updates.append({"scenario_file":scenario_file,"full_path":full_path,"val":val,"target":target})
@@ -338,7 +366,7 @@ def call_ps_action(action):
             process.kill()  # Ensure it’s terminated
 
 def check_city_prefix(path):
-
+    hold = os.path.basename(path)
     if len(os.path.basename(path)) == 3:
         return os.path.basename(path)
     if len(os.path.basename(path).split('_')[0]) ==3:
@@ -346,7 +374,7 @@ def check_city_prefix(path):
     else:
         return None
 
-def copy_cases(new_case_path, case_path = '', move_cases: bool = True, new_cases:list =[], keep_files: list = [], keep_suffixes:list = [], parallel: bool = False, check_city: bool = False):
+def copy_cases(new_case_path, case_path = '', move_cases: bool = True, new_cases:list =[], keep_files: list = [], keep_suffixes:list = [], parallel: bool = False, check_city: bool = False, include_dirs: bool =False):
     
     debug = False
     skip = False
@@ -354,34 +382,59 @@ def copy_cases(new_case_path, case_path = '', move_cases: bool = True, new_cases
     if move_cases: #just completely copy a set of cases from one place to another
         type = "copy"
         items =[]
-        folds = os.listdir(case_path)
-        if not os.path.isdir(new_case_path):
-            os.makedirs(new_case_path)
-        for fold in folds:
-            full_path = os.path.join(case_path,fold)
-            if os.path.isfile(full_path):
-                pass
-            elif os.path.isdir(full_path):
-                fold_suffix = fold.split('_')[-1]
-                if keep_suffixes !=None and keep_suffixes != []:
-                    if fold_suffix in keep_suffixes:
-                        continue
-                old_folder_name = os.path.basename(full_path)
-                new_fold = os.path.join(new_case_path,old_folder_name)
-                actions =[]
-                if not os.path.isdir(new_fold):
-                    os.makedirs(new_fold)
-                for item in os.listdir(full_path):
-                    sub_path = os.path.join(full_path,item)
-                    if os.path.isfile(sub_path) and not os.path.isfile(os.path.join(new_fold,item)):
-                        move = (sub_path,os.path.join(new_fold,item))
-                        items.append(move)
+        
+        if include_dirs:
+            base_path = case_path
+            dir_list = []
+            file_list = []
+            for current_folder, sub_folders, files in os.walk(case_path):
+                rel_fold = os.path.relpath(current_folder,case_path)
+                if rel_fold not in dir_list and current_folder != case_path:
+                    dir_list.append(rel_fold)
+                    for sub_files in files:
+                        rel_path = os.path.join(rel_fold,sub_files)
+                        file_list.append(rel_path)
+            for dir in dir_list:
+                home_dir = os.path.join(case_path,dir)
+                new_dir = os.path.join(new_case_path,dir)
+                if not os.path.exists(new_dir):
+                    os.makedirs(new_dir)
+            
+            for tar_file in file_list:
+                home_file = os.path.join(case_path,tar_file)
+                dest_file = os.path.join(new_case_path,tar_file)
+                items.append((home_file,dest_file))
+
+        else:
+            folds = os.listdir(case_path)
+            if not os.path.isdir(new_case_path):
+                os.makedirs(new_case_path)
+            for fold in folds:
+                full_path = os.path.join(case_path,fold)
+                if os.path.isfile(full_path):
+                    pass
+                elif os.path.isdir(full_path):
+                    fold_suffix = fold.split('_')[-1]
+                    if keep_suffixes !=None and keep_suffixes != []:
+                        if fold_suffix in keep_suffixes:
+                            continue
+                    old_folder_name = os.path.basename(full_path)
+                    new_fold = os.path.join(new_case_path,old_folder_name)
+                    actions =[]
+                    if not os.path.isdir(new_fold):
+                        os.makedirs(new_fold)
+                    for item in os.listdir(full_path):
+                        sub_path = os.path.join(full_path,item)
+                        if os.path.isfile(sub_path) and not os.path.isfile(os.path.join(new_fold,item)):
+                            move = (sub_path,os.path.join(new_fold,item))
+                            items.append(move)
+                
         moves[type] = items
 
     elif new_cases == [] and (not os.path.isdir(new_case_path) or len(os.listdir(new_case_path))== 0):
         warnings.warn("I don't know what cases I am supposed to copy or there is nothing here for me to update.")
     elif new_cases != []: #take a single base folder and expand it into a bunch of cases
-        warnings.warn("This has not yet been debugged... proceed with caution.")
+        #warnings.warn("This has not yet been debugged... proceed with caution.")
         type = "copy"
         items =[]
         
@@ -531,7 +584,7 @@ def update_new_scenarios(new_cases:list, combinations:list, new_case_path:str, f
             if case_var.value_key:
                 val = key[val]
             fold_path = os.path.join(new_case_path,folds[j])
-            update_scenario_file(os.path.join(fold_path,scen),fold_path,val,target)
+            update_scenario_file([os.path.join(fold_path,_) for _ in scen] if isinstance(scen,list) and len(scen)>1 else os.path.join(fold_path,scen),fold_path,val,target)
             j+=1
         i+=1
 
@@ -626,11 +679,11 @@ class PolarisRunConfig():
             min = frac_part * 60
             if len(str(min)) == 1:
                 min = '0'  + str(int(min))
-            city.city_total_time = f"""{hr}:{int(min)}:00"""
+            city.city_total_time = f"""{hr}:{int(min) if len(str(int(min)))==2 else "0"+str(int(min))}:00"""
         
 
 def create_jobscript(job_name:str = "",nodes:int =1,cpus_per_task:int = 8,
-                     mail_user:str="", mail_type: MailType = MailType.NONE,case_dir:str = "",config:PolarisRunConfig = None):
+                     mail_user:str="", mail_type: MailType = MailType.NONE,case_dir:str = "",config:PolarisRunConfig = None, redo_files = [], custom_foot = None):
     
     citykeys = config.cities
 
@@ -646,7 +699,7 @@ def create_jobscript(job_name:str = "",nodes:int =1,cpus_per_task:int = 8,
     folders_with_sqlite = []
     for root, dirs, files in os.walk(case_dir):
         for file in files:
-            if file.endswith('.sqlite'):
+            if file.endswith('.sqlite') and "iteration" not in root and "pop_syn" not in root:
                 folders_with_sqlite.append(root)
                 break  # No need to check other files in this folder
     if len(folders_with_sqlite) == 0:
@@ -665,35 +718,31 @@ def create_jobscript(job_name:str = "",nodes:int =1,cpus_per_task:int = 8,
     unique_cities = list(set(cities))
     city_dict = {city.city_prefix: city for city in citykeys}
 
+    
 
     for city in unique_cities:
         script_path = os.path.join(run_dir,f"jobscript_{city}.sh")
-        formatted_paths = "\n".join([f'"{path}"' for path in city_folder_dict[city]])
+        formatted_paths = "\n\t".join([f'"{path}"' for path in city_folder_dict[city] if (os.path.split(path)[-1] in redo_files and len(redo_files)>0) or len(redo_files)==0])
         if city in city_dict:
             city_info = city_dict[city]
             time = city_info.city_total_time
             mem_per_task = city_info.city_mem
 
-        jobscript_header = f"""#!/bin/bash
-        #SBATCH --job-name={job_name}
-        #SBATCH --nodes={nodes}
-        #SBATCH --time={time}
-        #SBATCH --cpus-per-task={cpus_per_task}
-        #SBATCH --mem={mem_per_task}gb
-        #SBATCH --mail-user={mail_user}
-        #SBATCH --mail-type={mail_type}"""
+        jobscript_header = \
+        f"""#!/bin/bash\n#SBATCH --job-name={job_name}\n#SBATCH --nodes={nodes}\n#SBATCH --time={time}\n#SBATCH --cpus-per-task={cpus_per_task}\n#SBATCH --mem={mem_per_task}gb\n#SBATCH --mail-user={mail_user}"""
+            #SBATCH --mail-type={mail_type}"""
 
-        if len(folders_with_sqlite) > 1:
-            jobscript_header += f"""\n#SBATCH --array=0-{len(folders_with_sqlite)-1}"""
-            jobscript_header +=f"""\n\nPATHS=(
-                                {formatted_paths}
-                                )"""
+        case_cnt = len(formatted_paths.splitlines())
+        if case_cnt> 1:
+            jobscript_header += f"""\n#SBATCH --array=0-{case_cnt-1}"""
+            jobscript_header += f"""\n\nPATHS=(\n\t{formatted_paths}\n\t\t)"""
             jobscript_header += f"""\n\nSCENARIO_PATH=${{PATHS[$SLURM_ARRAY_TASK_ID]}}"""
 
-        jobscript_header += """\n\n#SBATCH --output=${LOG_DIR}/output_%A_%a.out
-                            #SBATCH --error=${LOG_DIR}/error_%A_%a.err"""
-
-        jobscript_header += f"""\n\napptainer exec --bind "$SCENARIO_PATH":/mnt/data {config.container_path} python3 {config.run_script} /mnt/data {config.threads} {config.abm_init} {config.skim_init} {config.abm_runs} {city_info.city_name} {city_info.city_scale_factor}"""
+        jobscript_header += """\n\n#SBATCH --output=${LOG_DIR}/output_%A_%a.out\n#SBATCH --error=${LOG_DIR}/error_%A_%a.err"""
+        if not custom_foot is None:
+            jobscript_header+= f"""\n\n{custom_foot}"""
+        else:
+            jobscript_header += f"""\n\napptainer exec --bind "$SCENARIO_PATH":/mnt/data {config.container_path} python3 {config.run_script} /mnt/data {config.threads} {config.abm_init} {config.skim_init} {config.abm_runs} {city_info.city_name} {city_info.city_scale_factor}"""
 
         with open(script_path, 'w') as file:
             file.write(jobscript_header)

@@ -31,6 +31,39 @@ def process_folder_names_wtp(config:PostProcessingConfig):
         results[key]=df
     config.update_config(results=results)
 
+def process_folder_names_rl_repo(config:PostProcessingConfig):
+    results={}
+    for key, value in config.results.items():
+        df = value
+        #skip if no rows in the dataframe
+        if df.empty:
+            warnings.warn(f"No data found for {key}. Skipping folder name processing.")
+            #add a city and fleet size column to the dataframe
+            df['City'] = 'N/A'
+            df['Fleet Size'] = 'N/A'
+            df['Repo_Weight'] = 'N/A'
+            df['Strategy'] = 'N/A'
+            df['Iteration'] = 'N/A'
+            results[key]=df
+            continue
+        print(f"Creating case columns for {key}.")
+            # Split the 'folder' column by '_'
+        df[['folder_1', 'folder_2']] = df['folder'].str.split('_', n=1, expand=True)
+        df[['folder_2_1', 'folder_2_2']] = df['folder_2'].str.split('_', n=1, expand=True)
+        df[['folder_2_3', 'folder_2_4']] = df['folder_2_2'].str.split('_', n=1, expand=True)
+
+        #Check if folder_2_2 contains letters or a number by row
+        #for rows where folder_2_2 contains letters, set the strategy to those letter codes
+        #for rows where folder_2_2 contains a number, set the strategy to 'jar'
+        df['Strategy'] = df['folder_2_3'].apply(lambda x: x if x.isalpha() else 'jar')
+        df['Repo_Weight'] = df['folder_2_3'].apply(lambda x: x if x.isnumeric() else 'N/A')
+        df = df.rename(columns={'folder_1': 'City', 'folder_2_1': 'Fleet Size', 'folder_2_4': 'Iteration'})
+        # Drop unnecessary columns
+        df.drop(columns=['folder_2_3', 'folder_2_4','folder_2','folder_2_2'], inplace=True)
+
+        results[key]=df
+    config.update_config(results=results)
+
 def process_folder_names_cit_fleet_strat(config:PostProcessingConfig):
     results={}
     for key, value in config.results.items():

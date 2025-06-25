@@ -5,8 +5,9 @@ import numpy as np
 from .utils import get_timeperiods, get_tnc_pricing, get_heur_discount, get_repositioning_interval
 import openmatrix as omx
 from CU_POLARIS_Postprocessor.config import PostProcessingConfig
-from CU_POLARIS_Postprocessor.utils import get_scale_factor
+from CU_POLARIS_Postprocessor.utils import get_scale_factor, get_fleet_size
 from functools import partial
+import shutil
 
 def process_nearest_stops(iter_dir, folder, **kwargs):
     dir = iter_dir
@@ -23,8 +24,10 @@ def process_nearest_stops(iter_dir, folder, **kwargs):
     GROUP BY b.household, c.x, c.y, c.zone;"""
     if os.path.exists(dir.as_posix() + '/Austin-Supply.sqlite'):
         city = 'Austin'
-    elif os.path.exists(dir.as_posix() + '/Greenville-Supply.sqlite'):
-        city =  'greenville'
+    elif os.path.exists(dir.as_posix() + '/Greenville-Supply.sqlite') or os.path.exists(dir.as_posix() + '/greenville-Supply.sqlite') or os.path.exists(dir.parent.as_posix() + '/greenville-Supply.sqlite'):
+        if os.path.exists(dir.parent.as_posix() + '/greenville-Supply.sqlite'):
+            shutil.copyfile(dir.parent.as_posix() + '/greenville-Supply.sqlite',dir.as_posix() + '/greenville-Supply.sqlite')
+            city =  'greenville'
     elif os.path.exists(dir.as_posix() + '/Bloomington-Supply.sqlite'):
         city = 'Bloomington'
     else:
@@ -305,7 +308,7 @@ def process_tnc_stat_summary(iter_dir, demand_db,folder, config:PostProcessingCo
     summary_df.to_csv(iter_dir.as_posix() + '/tnc_stat_summary_helper.csv')
     return summary_df
 
-def process_demo_financial_case_data(iter_dir, demand_db, result_db, request_file_name, trip_multiplier, **kwargs):
+def process_demo_financial_case_data(iter_dir, demand_db, result_db, request_file_name, trip_multiplier, config:PostProcessingConfig, **kwargs):
 
     ride_min_min = 5
     per_min_min=1.4
@@ -323,12 +326,14 @@ def process_demo_financial_case_data(iter_dir, demand_db, result_db, request_fil
     op_cost_saev_p = 0.58/km_mile
     op_cost_saev_np=0.48/km_mile
     req_case_sum = pd.DataFrame()
+
+
     with sqlite3.connect(iter_dir.as_posix() + '/'+ result_db) as conn:
         conn.cursor().executescript(f"""attach database '{iter_dir.as_posix()+'/'+demand_db}' as a;""");
-        fleet_size = pd.read_sql("""select (SELECT count(*) as fleet_size FROM TNC_Statistics) as fleet_size, (select count(*) from tnc_request) as requests;""",conn) * trip_multiplier
+        requests = pd.read_sql("""select (SELECT count(*) as fleet_size FROM TNC_Statistics) as fleet_size, (select count(*) from tnc_request) as requests;""",conn) * trip_multiplier
         rev_vht_vmt = pd.read_sql(f"""select sum(end-start)/60 as revenue_minutes_traveled, sum(travel_distance)/1609.34 as revenue_miles_traveled from tnc_trip where passengers >0""",conn)*trip_multiplier
         
-
+    fleet_size = get_fleet_size(iter_dir, config)
 
         
     dir_name = os.path.split(os.path.split(iter_dir.absolute())[0])[1]
@@ -359,10 +364,10 @@ def process_demo_financial_case_data(iter_dir, demand_db, result_db, request_fil
     'total_operating_cost_2_van': x['op_2_van'].sum() * trip_multiplier,
     'total_operating_cost_3': x['op3'].sum() * trip_multiplier,
     'total_fare': x['corrected fare'].sum() * trip_multiplier,
-    'requests': fleet_size['requests'].iloc[0],  # Extract scalar value
-    'fleet_size': fleet_size['fleet_size'].iloc[0],  # Extract scalar value
-    'revenue per vehicle': x['corrected fare'].sum() * trip_multiplier / fleet_size['fleet_size'].iloc[0],
-    'revenue per request': x['corrected fare'].sum() * trip_multiplier / fleet_size['requests'].iloc[0],
+    'requests': requests['requests'].iloc[0],  # Extract scalar value
+    'fleet_size': fleet_size,  # Extract scalar value
+    'revenue per vehicle': x['corrected fare'].sum() * trip_multiplier / fleet_size,
+    'revenue per request': x['corrected fare'].sum() * trip_multiplier / requests['requests'].iloc[0],
     'revenue_minutes_traveled': rev_vht_vmt['revenue_minutes_traveled'].iloc[0],  # Extract scalar value
     'revenue_miles_traveled': rev_vht_vmt['revenue_miles_traveled'].iloc[0],  # Extract scalar value
     'folder': dir_name + f'_{iteration_num}',

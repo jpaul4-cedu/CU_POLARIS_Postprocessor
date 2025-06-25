@@ -21,7 +21,7 @@ class PostProcessingConfig:
                  csvs=None,
                  results=None,
                  unique_folders=None,
-                 output_h5=False, parallel=True):
+                 output_h5=False, parallel=True, unfinished=[]):
         
         self.fresh_start = fresh_start
         self.do_closest_stops = do_closest_stops
@@ -30,6 +30,7 @@ class PostProcessingConfig:
         self.reset_stops = reset_stops
         self.force_skims = force_skims
         self.parallel = parallel
+        self.unfinished = []
         
         self.base_dir = base_dir
         self.sql_tables = sql_tables if sql_tables is not None else []

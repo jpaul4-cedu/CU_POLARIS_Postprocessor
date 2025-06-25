@@ -11,6 +11,25 @@ import pandas as pd
 
 def pre_run_checks(config:PostProcessingConfig):
     # Validate there is a sql query for each sql based table we want
+    
+    #check if all the runs are complete
+    parent_folder = config.base_dir
+    folders = [Path(os.path.join(parent_folder, f)) for f in os.listdir(parent_folder) if (os.path.isdir(os.path.join(parent_folder, f)) and not f.endswith("_UNFINISHED"))]
+    
+    
+    unfinished =[]
+    for folder in folders:
+        dir = get_highest_iteration_folder(folder)
+        if not os.path.exists(os.path.join(dir,"finished")):
+            unfinished.append(folder)
+            
+
+    if len(unfinished) > 0:
+        config.unfinished.append(unfinished)
+        return False
+
+
+
     path = config.base_dir.resolve()
     config.update_config(base_dir=path)
     cats = separate_keys_by_value(config.desired_outputs)
@@ -29,8 +48,14 @@ def pre_run_checks(config:PostProcessingConfig):
     csvs_exist = True
     results = {}
     folders = []
-    run_dirs = [Path(d) for d in glob.glob(config.base_dir.as_posix() + "/*/")]
+    run_dirs = [Path(d)  for d in glob.glob(config.base_dir.as_posix() + "/*/")]
+    tmp =[]
+    for dir in run_dirs:
+        if not dir.as_posix().endswith("UNFINISHED"):
+            tmp.append(dir)
     
+    run_dirs = tmp
+        
     
     
     for outer_key, items in cats.items():
@@ -121,4 +146,4 @@ def pre_run_checks(config:PostProcessingConfig):
         return pre_run_checks(config)
     else:
         return True
-    
+

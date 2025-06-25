@@ -15,18 +15,29 @@ IL.reload(CU_POLARIS_Postprocessor.power_bi_processing.prep_utils)
 
 
 def run_anal(config_wtp:PostProcessingConfig):
-    prerun.pre_run_checks(config_wtp)
+    state = prerun.pre_run_checks(config_wtp)
+    if not state:
+        unfinished = config_wtp.unfinished
+        proceed = input(f"{len(unfinished)} unfinished directories in output. Proceed without? [y/n]")
+        if proceed == "y":
+            for file in unfinished:
+                if not file.as_posix().endswith("_UNFINISHED"):
+                    os.rename(file,file.as_posix()+"_UNFINISHED")
+                prerun.pre_run_checks(config_wtp)
+        else:
+            raise ValueError("Unfinished cases in analysis directory.")
     parallel.parallel_process_folders(config_wtp)
     IL.reload(CU_POLARIS_Postprocessor.power_bi_processing.prep_utils)
     #use this for comparing all cases (within a city model) to a single base case
-    base_case_folders = ['gsc_300_jar','gvl_du_7']
+    #base_case_folders = ['gsc_300_jar','gvl_du_7']
     #prep_utils.process_tnc_ttests(config=config_wtp,base_cases=base_case_folders)
 
     #Use this for comparing strategy to strategy
-    prep_utils.process_tnc_ttests(config=config_wtp,base_suffix="_jar")
+    prep_utils.process_tnc_ttests(config=config_wtp,base_suffix="_nr")
 
     #Use this for folder names structured cit_fleet-size_strategy_iteration
-    prep_utils.process_folder_names_cit_fleet_strat(config_wtp)
+    #prep_utils.process_folder_names_cit_fleet_strat(config_wtp)
+    prep_utils.process_folder_names_rl_repo(config_wtp)
 
     #Use this for folder names structured cit_case_iteration
     #prep_utils.process_folder_names_wtp(config_wtp)
@@ -57,16 +68,16 @@ def run_pbix(config_wtp:PostProcessingConfig):
     pbix_charting.open_pbix_file(config_wtp.base_dir,study_name)
 
 def __main__():
-    config_wtp=PostProcessingConfig(base_dir=Path(r"C:\\polaris\\data\\tests_local\\initial_tests"),
+    config_wtp=PostProcessingConfig(base_dir=Path(r"/scratch/jpaul4/repositioning/rl_repo_data/for_anal/"),
                                     output_h5=True,
-                                    fresh_start=True,
+                                    fresh_start=False,
                                     reset_csvs=True,
                                     reset_sql=True,
                                     reset_stops=True, 
                                     db_names=['greenville','campo'],
-                                    scenario_file_names=['scenario_abm_jar.json','scenario_abm_default_repo.json','scenario_abm_no_repo.json'],
+                                    scenario_file_names=['scenario_abm_jar.json','scenario_abm_default_repo.json','scenario_abm_no_repo.json','scenario_abm.json'],
                                     fleet_model_file_names=['TNCFleetModel_joint_proactive_repo.json','TNCFleetModel_proactive_default_repo.json','TNCFleetModel_proactive_no_repo.json'],
-                                    parallel=False)
+                                    parallel=True)
     run_anal(config_wtp)
     run_pbix(config_wtp)
    # pbix_charting.create_pbix_path_query()

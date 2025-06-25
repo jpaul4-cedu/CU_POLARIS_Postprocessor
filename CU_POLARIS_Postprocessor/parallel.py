@@ -16,7 +16,8 @@ from .postprocessing import process_batch_nearest_stops, process_elder_request_a
 def parallel_process_folders(config:PostProcessingConfig):
     # Get a list of all subfolders in the parent folder
     parent_folder = config.base_dir
-    folders = [Path(os.path.join(parent_folder, f)) for f in os.listdir(parent_folder) if os.path.isdir(os.path.join(parent_folder, f))]
+    folders = [Path(os.path.join(parent_folder, f)) for f in os.listdir(parent_folder) if (os.path.isdir(os.path.join(parent_folder, f)) and not f.endswith("_UNFINISHED"))]
+    
 
     # Use ThreadPoolExecutor or ProcessPoolExecutor to process folders in parallel
     workers = os.cpu_count() + 4
@@ -110,9 +111,17 @@ def process_folder(dir, config:PostProcessingConfig):
         CREATE INDEX IF NOT EXISTS idx_demand_household_household ON household(household);
         CREATE INDEX IF NOT EXISTS idx_demand_household_location ON household(location);"""
     
-    match = re.search(r'_iteration_(\d+)', dir.as_posix())
-    it_num =  int(match.group(1))
-    folder = dir_name+'_' +str(it_num)
+    pattern = re.compile(r'^(.*)_iteration_(\d+)?$')
+    match = pattern.match(dir.as_posix())
+    #match = re.search(r'_iteration_(\d+)', dir.as_posix())
+    try:
+        it_num =  int(match.group(1))
+    except:
+        it_num = 0
+    folder = dir_name + '_' + str(it_num)
+
+
+    
     
     results = {}
     if len(config.sql_tables)>0 :
