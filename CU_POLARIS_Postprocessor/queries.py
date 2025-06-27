@@ -1,7 +1,17 @@
+from .config import PostProcessingConfig
+from pathlib import Path
 
-
-
-def get_sql_create(supply_db,trip_multiplier,result_db):
+def get_sql_create(supply_db=None,trip_multiplier=None,result_db=None,config:PostProcessingConfig=None,dir:Path=None):
+    if not config is None:
+        if dir is None:
+            raise ValueError("If config is provided, dir is required.")
+        db_dir = config.folder_db_map[dir]
+        supply_db = db_dir["supply"]
+        demand_db = db_dir["demand"]
+        result_db = db_dir["result"]
+        trip_multiplier = db_dir["trip_multiplier"]
+    
+    
     queries = {
     "attach": f"""
         ATTACH DATABASE "{result_db}" as a;

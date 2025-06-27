@@ -83,17 +83,23 @@ def get_highest_iteration_folder(base_folder):
 def get_scale_factor(dir, config:PostProcessingConfig):
     if not isinstance(dir,Path):
         dir = Path(dir)
-    scale, fleet = get_scale_factor_and_fleet_size(dir,config)
+    scale, _ , _ = get_scale_factor_and_fleet_size(dir,config)
     return scale
 
 def get_fleet_size(dir, config:PostProcessingConfig):
     if not isinstance(dir,Path):
         dir = Path(dir)
-    scale, fleet = get_scale_factor_and_fleet_size(dir,config)
+    _, fleet , _ = get_scale_factor_and_fleet_size(dir,config)
     return fleet
 
-def get_scale_factor_and_fleet_size(dir, config:PostProcessingConfig):
-    df = pd.DataFrame() 
+def get_db_name(dir, config:PostProcessingConfig):
+    if not isinstance(dir,Path):
+        dir = Path(dir)
+    _, _ , db_name = get_scale_factor_and_fleet_size(dir,config)
+    return db_name
+
+def get_scenario_files (dir,config):
+     
     # Set current working directory
     for scen in config.scenario_file_names:
         if os.path.exists(Path(dir.as_posix() + "/model_files/" + scen)):
@@ -104,22 +110,36 @@ def get_scale_factor_and_fleet_size(dir, config:PostProcessingConfig):
         if os.path.exists(Path(dir.as_posix() + "/model_files/" + sav)):
             fleet_path = Path(dir.as_posix() + "/model_files/" + sav)
             break
+    return scen_path, fleet_path
+
+def get_strategies(dir,config):
+    scen_path, fleet_path = get_scenario_files(dir,config)
+    with open(scen_path, 'r') as file:
+        scenario = json.load(file)
+    with open(fleet_path,'r') as file:
+        saev_fleet_model = json.load(file)
+    strategy = saev_fleet_model["Operator_1"]["strategy_name"]
+    assignment_strategy = saev_fleet_model[strategy]["assignment_strategy"]
+    repositioning_strategy = saev_fleet_model[strategy]["reposition_strategy"]
+    return assignment_strategy, repositioning_strategy
 
 
-   
-
+def get_scale_factor_and_fleet_size(dir, config:PostProcessingConfig):
+    df = pd.DataFrame()
+    scen_path, fleet_path = get_scenario_files(dir,config)
     with open(scen_path, 'r') as file:
         scenario = json.load(file)
     with open(fleet_path,'r') as file:
         saev_fleet_model = json.load(file)
    
-    
     # Extract the traffic scale factor
     tsf = scenario["Population synthesizer controls"]["traffic_scale_factor"]
+    db_name = scenario["General simulation controls"]["database_name"]
     try:
         fleet_size = saev_fleet_model["Operator_1"]["Fleet_Base"]["Operator_1_TNC_FLEET_SIZE"]
     except KeyError:
         fleet_size = saev_fleet_model["Operator_1"]["Fleet_Base"]["TNC_FLEET_SIZE"]
+    
     # Extract the directory name
     dir_name = os.path.split(os.path.split(dir.absolute())[0])[1]
     
@@ -135,7 +155,7 @@ def get_scale_factor_and_fleet_size(dir, config:PostProcessingConfig):
      #   raise ValueError("There are mismatched traffic scale factors in your data set. Please validate.")
     traffic_scale_factor = unique_values[0]
     trip_multiplier = 1/traffic_scale_factor
-    return trip_multiplier, unique_fleet[0]
+    return trip_multiplier, unique_fleet[0], db_name
 
 def get_timeperiods(dir):
     def _process_omx(time_perios_loc): 

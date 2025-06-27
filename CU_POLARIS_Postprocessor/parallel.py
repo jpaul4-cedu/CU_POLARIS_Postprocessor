@@ -1,7 +1,7 @@
 import concurrent.futures
 from pathlib import Path
 import os
-from .utils import get_highest_iteration_folder, get_scale_factor
+from .utils import get_highest_iteration_folder, get_scale_factor, get_db_name
 from .queries import get_sql_create
 import tarfile
 import re
@@ -16,7 +16,7 @@ from .postprocessing import process_batch_nearest_stops, process_elder_request_a
 def parallel_process_folders(config:PostProcessingConfig):
     # Get a list of all subfolders in the parent folder
     parent_folder = config.base_dir
-    folders = [Path(os.path.join(parent_folder, f)) for f in os.listdir(parent_folder) if (os.path.isdir(os.path.join(parent_folder, f)) and not f.endswith("_UNFINISHED"))]
+    folders = config.unique_folders
     
 
     # Use ThreadPoolExecutor or ProcessPoolExecutor to process folders in parallel
@@ -39,11 +39,11 @@ def parallel_process_folders(config:PostProcessingConfig):
                 collected_results[key].append(df)
     final_results = {key: pd.concat(df_list, ignore_index=True) for key, df_list in collected_results.items()}
     for key, df in final_results.items():
-        df.to_csv(parent_folder.as_posix() +'/' + key + '.csv', index=False)
+        df.to_csv(config.analysis_folder +'/' + key + '.csv', index=False)
     final_results.update(config.results)
     config.update_config(results=final_results)
     if config.output_h5:
-        with pd.HDFStore(config.base_dir.as_posix()+'/results.h5') as store:
+        with pd.HDFStore(config.analysis_folder +'/results.h5') as store:
             for key, df in final_results.items():
                 store[key] = df
     return True
@@ -52,52 +52,41 @@ def process_folder(dir, config:PostProcessingConfig):
 
     print(f"starting on directory {dir}")
     dir = get_highest_iteration_folder(dir)
-    #dir = Path(dir.as_posix())
-    #print(f"Opening: {dir}")
-    for name in config.db_names:
-
-        
-        if os.path.exists(Path(dir.as_posix() + '/' + name+'-Supply.sqlite')):
-            if os.path.getsize(Path(dir.as_posix() + '/' + name+'-Supply.sqlite')) > 1024:  # Check if the file size is greater than 0
-                db_name = name
-                break
-        elif os.path.exists(Path(dir.as_posix() + '/' + name+'-Supply.sqlite.tar.gz')):
-            if os.path.getsize(Path(dir.as_posix() + '/' + name+'-Supply.sqlite.tar.gz')) > 1024:  # Check if the file size is greater than 0
-                db_name = name
-            break
-        #if not found, get supply db from parent folder
-        elif os.path.exists(Path(dir.parent.as_posix() + '/' + name+'-Supply.sqlite')):
-            if os.path.getsize(Path(dir.parent.as_posix() + '/' + name+'-Supply.sqlite')) > 1024:
-                db_name = name
-                break
-    
-    
+   
+    db_name = get_db_name(dir,config) 
     demand_db = db_name + "-Demand.sqlite"
     #result_db = f"{db_name}-Result.sqlite"
     result_db = db_name + "-Result.sqlite"
     supply_db = db_name + "-Supply.sqlite"
-    trip_multiplier = get_scale_factor(dir,config)
     
     
-    if not os.path.exists(dir.as_posix() + '/'+ demand_db):
-        with tarfile.open(dir.as_posix()+'/' + demand_db + '.tar.gz','r:gz') as tar:
-            tar.extractall(path = dir)     
-        
+    dbs = {"demand":demand_db,"result":result_db,"supply":supply_db}
+    db_paths = {}
+    for key, item in dbs.items():
+        item_path = os.path.join(dir,item)
+        if not os.path.isfile(item_path):
+            parent_dir = os.path.abspath(os.path.join(os.path.join(dir,os.pardir),item))
+            if os.path.isfile(parent_dir):
+                shutil.copy(parent_dir,item_path)
+            else:
+                tar_path = item_path + ".tar.gz"
+                if not os.path.exists(tar_path):
+                    tar_path = parent_dir + ".tar.gz"
+                    if not os.path.exists(tar_path):
+                        raise FileNotFoundError(f"Cannot find output database {item} in folder {dir.as_posix()}.")
+                with tarfile.open(tar_path,'r:gz') as tar:
+                    tar.extractall(path = dir)
+        db_paths[key] = item_path
 
-    if not os.path.exists(dir.as_posix() + '/'+ result_db):
-        with tarfile.open(dir.as_posix()+'/' + result_db + '.tar.gz','r:gz') as tar:
-            tar.extractall(path = dir)
-
-    if not os.path.exists(dir.as_posix() + '/'+ supply_db):
-        if os.path.exists(dir.parent.as_posix() + '/'+ supply_db):
-            #copy supply db from parent folder
-            shutil.copyfile(dir.parent.as_posix() + '/'+ supply_db, dir.as_posix() + '/'+ supply_db)
-        else:
-            with tarfile.open(dir.as_posix()+'/' + supply_db + '.tar.gz','r:gz') as tar:
-                tar.extractall(path = dir)
-
-
-    queries = get_sql_create(supply_db=dir.as_posix() + '/'+ supply_db,trip_multiplier=trip_multiplier,result_db=dir.as_posix() + '/'+result_db)
+    
+    db_paths["trip_multiplier"]= get_scale_factor(dir,config)
+    config.folder_db_map[dir]=db_paths
+    supply_db = db_paths["supply"]
+    demand_db = db_paths["demand"]
+    result_db = db_paths['result']
+    trip_multiplier = db_paths["trip_multiplier"]
+    
+    queries = get_sql_create(config=config,dir=dir)
     queries_to_run =[queries[key] for key in config.sql_tables if key in queries]
     #print(queries_to_run)
     dir_name = os.path.split(os.path.split(dir.absolute())[0])[1]
@@ -111,14 +100,14 @@ def process_folder(dir, config:PostProcessingConfig):
         CREATE INDEX IF NOT EXISTS idx_demand_household_household ON household(household);
         CREATE INDEX IF NOT EXISTS idx_demand_household_location ON household(location);"""
     
-    pattern = re.compile(r'^(.*)_iteration_(\d+)?$')
-    match = pattern.match(dir.as_posix())
-    #match = re.search(r'_iteration_(\d+)', dir.as_posix())
+    it = dir.as_posix().split("_")[-1]
     try:
-        it_num =  int(match.group(1))
+        int(it)
     except:
-        it_num = 0
-    folder = dir_name + '_' + str(it_num)
+        if dir.as_posix().endswith("_"):
+            it = 0
+    
+    folder = dir_name + '_' + str(it)
 
 
     
@@ -126,12 +115,16 @@ def process_folder(dir, config:PostProcessingConfig):
     results = {}
     if len(config.sql_tables)>0 :
         try:        
-            with  sqlite3.connect(dir.as_posix() + '/'+ supply_db) as conn:
+            with  sqlite3.connect(supply_db) as conn:
                 ### Indexes for elder queries
                 conn.cursor().executescript(index_script_supply)
 
             
-            with sqlite3.connect(dir.as_posix() + '/'+ demand_db) as conn:
+            with sqlite3.connect(demand_db) as conn:
+                temp_df = pd.read_sql(f"select * from tnc_request;", conn)
+                if temp_df.shape[0] == 0:
+                    print(f"No requests in {dir.as_posix()}.")
+                    return {}
                 conn.cursor().executescript(index_script_demand)
                 for query in queries_to_run:
                     conn.cursor().executescript(query)

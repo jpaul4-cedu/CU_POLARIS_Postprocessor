@@ -1,6 +1,7 @@
 # my_package/config.py
 
 from pathlib import Path
+import os
 
 class PostProcessingConfig:
     def __init__(self, 
@@ -21,8 +22,21 @@ class PostProcessingConfig:
                  csvs=None,
                  results=None,
                  unique_folders=None,
-                 output_h5=False, parallel=True, unfinished=[]):
+                 output_h5=False, 
+                 parallel=True, 
+                 unfinished=[],
+                 ignore_folders=[],
+                 analysis_folder = ""):
         
+        self.ignore_folders = ignore_folders
+        if analysis_folder == "":
+            analysis_folder = "parallel_processing_output"
+        if not os.path.isabs(analysis_folder):
+            analysis_folder = os.path.join(base_dir,analysis_folder)
+        if not os.path.exists(analysis_folder):
+            os.makedirs(analysis_folder)
+        self.analysis_folder = analysis_folder
+
         self.fresh_start = fresh_start
         self.do_closest_stops = do_closest_stops
         self.reset_sql = reset_sql
@@ -42,6 +56,7 @@ class PostProcessingConfig:
         self.fleet_model_file_names = fleet_model_file_names if fleet_model_file_names is not None else ['SAEVFleetModel_optimization.json']
         self.db_names = db_names if db_names is not None else ['campo', 'greenville']
         self.pooling_model_file = pooling_model_file if pooling_model_file is not None else ['PoolingModel.json']
+        self.folder_db_map = {}
         
         self.postprocessing_definitions = postprocessing_definitions if postprocessing_definitions is not None else {
             'requests_sum':("process_solo_equiv_fare", {'force_skims': self.force_skims}),

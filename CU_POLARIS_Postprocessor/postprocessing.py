@@ -2,83 +2,80 @@ import os
 import sqlite3
 import pandas as pd
 import numpy as np
-from .utils import get_timeperiods, get_tnc_pricing, get_heur_discount, get_repositioning_interval
+#import .utils
+from .utils import get_timeperiods, get_tnc_pricing, get_heur_discount, get_repositioning_interval, get_strategies
 import openmatrix as omx
 from CU_POLARIS_Postprocessor.config import PostProcessingConfig
 from CU_POLARIS_Postprocessor.utils import get_scale_factor, get_fleet_size
 from functools import partial
 import shutil
 
-def process_nearest_stops(iter_dir, folder, **kwargs):
-    dir = iter_dir
-    from sklearn.neighbors import BallTree
-    from joblib import Parallel, delayed
-    print(f"Starting stop processing for {dir}.")
-    read_house_sql ="""SELECT b.household, c.x, c.y, b.workers, b.vehicles,
-    COUNT(CASE WHEN a.age > 60 THEN 1 END) AS people_over_60,
-    COUNT(CASE WHEN a.age <= 60 THEN 1 END) AS people_under_60,
-    sum(a.income) as income, c.zone
-    FROM person a
-    LEFT JOIN household b ON a.household = b.household
-    LEFT JOIN location c ON b.location = c.location
-    GROUP BY b.household, c.x, c.y, c.zone;"""
-    if os.path.exists(dir.as_posix() + '/Austin-Supply.sqlite'):
-        city = 'Austin'
-    elif os.path.exists(dir.as_posix() + '/Greenville-Supply.sqlite') or os.path.exists(dir.as_posix() + '/greenville-Supply.sqlite') or os.path.exists(dir.parent.as_posix() + '/greenville-Supply.sqlite'):
-        if os.path.exists(dir.parent.as_posix() + '/greenville-Supply.sqlite'):
-            shutil.copyfile(dir.parent.as_posix() + '/greenville-Supply.sqlite',dir.as_posix() + '/greenville-Supply.sqlite')
-            city =  'greenville'
-    elif os.path.exists(dir.as_posix() + '/Bloomington-Supply.sqlite'):
-        city = 'Bloomington'
-    else:
-        city = 'campo'
-
-    read_bus_sql = """select * from transit_stops;"""
-    supply_path = f"""attach database "{dir.as_posix() + '/'+city+'-Supply.sqlite'}" as a;"""
-    with sqlite3.connect(dir.as_posix() +'/'+ city+'-Demand.sqlite') as conn:
-        conn.cursor().executescript(supply_path);
-         # Load households and bus stops data into DataFrames
-        households_df = pd.read_sql_query(read_house_sql, conn)
-        bus_stops_df = pd.read_sql_query(read_bus_sql, conn)
-    bus_stops_coords = bus_stops_df[['X','Y']].values
-    households_coords = households_df[['x','y']].values
-    tree = BallTree(bus_stops_coords, leaf_size=40)
-
-    batch_size = 1000
-    n_jobs = -1  # Use all available CPU cores
-
-    # Create list of tasks
-    tasks = [(start, min(start + batch_size, len(households_coords))) for start in range(0, len(households_coords), batch_size)]
-
-    # Print tasks for debugging
-    #print("Tasks:", tasks)
-   
-    p_process_batch_nearest_stops = partial(process_batch_nearest_stops,households_coords=households_coords, tree=tree, households_df=households_df, bus_stops_df=bus_stops_df)
-
-    # Process tasks in parallel
-    results = Parallel(n_jobs=n_jobs)(delayed(p_process_batch_nearest_stops)(start, end) for start, end in tasks)
-   
-    # Flatten the list of results
-    flat_results = [item for sublist in results for item in sublist]
-
-    # Convert results to a DataFrame
-    results_df = pd.DataFrame(flat_results)
-    results_df['miles']=results_df['distance_to_nearest_bus_stop']/1609.34
+def process_nearest_stops(iter_dir,supply_db,demand_db, folder, config:PostProcessingConfig, **kwargs):
+    dir=iter_dir
     
+    if os.path.exists(dir.as_posix() + '/closest_stops_helper.csv'):
+        results_df_sum.to_csv(dir.as_posix() + '/closest_stops_helper.csv', index=False)
+    else:
+        from sklearn.neighbors import BallTree
+        from joblib import Parallel, delayed
+        print(f"Starting stop processing for {dir}.")
+        read_house_sql ="""SELECT b.household, c.x, c.y, b.workers, b.vehicles,
+        COUNT(CASE WHEN a.age > 60 THEN 1 END) AS people_over_60,
+        COUNT(CASE WHEN a.age <= 60 THEN 1 END) AS people_under_60,
+        sum(a.income) as income, c.zone
+        FROM person a
+        LEFT JOIN household b ON a.household = b.household
+        LEFT JOIN location c ON b.location = c.location
+        GROUP BY b.household, c.x, c.y, c.zone;"""
+        
 
-    walking_speed = 2.1 #mph https://www.medicalnewstoday.com/articles/average-walking-speed#average-speed-by-age
-    walk_lim = 8 #mins
+        
+        read_bus_sql = """select * from transit_stops;"""
+        supply_path = f"""attach database "{supply_db}" as a;"""
+        with sqlite3.connect(demand_db) as conn:
+            conn.cursor().executescript(supply_path);
+            # Load households and bus stops data into DataFrames
+            households_df = pd.read_sql_query(read_house_sql, conn)
+            bus_stops_df = pd.read_sql_query(read_bus_sql, conn)
+        bus_stops_coords = bus_stops_df[['X','Y']].values
+        households_coords = households_df[['x','y']].values
+        tree = BallTree(bus_stops_coords, leaf_size=40)
+
+        batch_size = 1000
+        n_jobs = -1  # Use all available CPU cores
+
+        # Create list of tasks
+        tasks = [(start, min(start + batch_size, len(households_coords))) for start in range(0, len(households_coords), batch_size)]
+
+        # Print tasks for debugging
+        #print("Tasks:", tasks)
+    
+        p_process_batch_nearest_stops = partial(process_batch_nearest_stops,households_coords=households_coords, tree=tree, households_df=households_df, bus_stops_df=bus_stops_df)
+
+        # Process tasks in parallel
+        results = Parallel(n_jobs=n_jobs)(delayed(p_process_batch_nearest_stops)(start, end) for start, end in tasks)
+    
+        # Flatten the list of results
+        flat_results = [item for sublist in results for item in sublist]
+
+        # Convert results to a DataFrame
+        results_df = pd.DataFrame(flat_results)
+        results_df['miles']=results_df['distance_to_nearest_bus_stop']/1609.34
+        
+
+        walking_speed = 2.1 #mph https://www.medicalnewstoday.com/articles/average-walking-speed#average-speed-by-age
+        walk_lim = 8 #mins
 
 
-    results_df['minutes walking']=results_df['miles']/walking_speed*60
-    results_df['walkable']=results_df['minutes walking'].apply(lambda x: 0 if x > walk_lim else 1)
-   # print(results_df.head(10))
-    results_df_sum = results_df.groupby(['walkable', 'vehicles', 'over_60', 'under_60','zone']).agg(count=('income', 'size'),total_income=('income', 'sum')).reset_index()
+        results_df['minutes walking']=results_df['miles']/walking_speed*60
+        results_df['walkable']=results_df['minutes walking'].apply(lambda x: 0 if x > walk_lim else 1)
+    # print(results_df.head(10))
+        results_df_sum = results_df.groupby(['walkable', 'vehicles', 'over_60', 'under_60','zone']).agg(count=('income', 'size'),total_income=('income', 'sum')).reset_index()
 
-    dir_name = os.path.split(os.path.split(dir.absolute())[0])[1]
-    results_df_sum=results_df_sum.assign(folder=folder)
-    results_df_sum.to_csv(dir.as_posix() + '/closest_stops_helper.csv', index=False)
-    print(f'Finished stop processing for {dir}.')
+        dir_name = os.path.split(os.path.split(dir.absolute())[0])[1]
+        results_df_sum=results_df_sum.assign(folder=folder)
+        results_df_sum.to_csv(dir.as_posix() + '/closest_stops_helper.csv', index=False)
+        print(f'Finished stop processing for {dir}.')
     return results_df_sum
 
 def process_batch_nearest_stops(start_idx, end_idx, households_coords, tree, households_df, bus_stops_df, **kwargs):
@@ -104,9 +101,8 @@ def process_batch_nearest_stops(start_idx, end_idx, households_coords, tree, hou
 
 def process_solo_equiv_fare(iter_dir, demand_db, supply_db, result_db, folder,force_skims, trip_multiplier, config:PostProcessingConfig, **kwargs):
     dir = iter_dir
-    supply_db_path = dir.as_posix() + '/'+ supply_db
-    result_db_path = dir.as_posix() + '/'+ result_db
-    with sqlite3.connect(dir.as_posix() + '/'+ demand_db) as conn:
+    
+    with sqlite3.connect(demand_db) as conn:
         if os.path.exists(dir.as_posix() + '/'+'requests_sum_helper.csv') and not force_skims:
             do_skim = False
         else:
@@ -129,8 +125,8 @@ def process_solo_equiv_fare(iter_dir, demand_db, supply_db, result_db, folder,fo
                                 left join location d on c.location = d.location
                                 ;"""
             do_skim = True
-            conn.cursor().executescript(f"""attach '{supply_db_path}' as a;""")
-            conn.cursor().executescript(f"""attach '{result_db_path}' as b;""")
+            conn.cursor().executescript(f"""attach '{supply_db}' as a;""")
+            conn.cursor().executescript(f"""attach '{result_db}' as b;""")
             req_df = pd.read_sql(request_sql, conn).assign(folder=folder)
             fleet_size = pd.read_sql("""select (SELECT count(*) as fleet_size FROM TNC_Statistics) as fleet_size, (select count(*) from tnc_request) as requests;""",conn) * trip_multiplier
         
@@ -196,7 +192,8 @@ def process_solo_equiv_fare(iter_dir, demand_db, supply_db, result_db, folder,fo
             p_min, p_mile, base = get_tnc_pricing(dir, config)
             req_df['solo_equiv_fare_skim'] = req_df['skim_time'] * p_min + req_df['skim_dist'] * p_mile + base
             
-            if "heur" in str(dir):
+            assignment_strategy, _ = get_strategies(dir,config)
+            if assignment_strategy == "default":
                 disc_rate = get_heur_discount(dir)
                 req_df.loc[req_df["pooled_service"]==1,'discount_rate'] = disc_rate
                 req_df.loc[req_df["pooled_service"]!=1,'discount_rate'] = 0
@@ -233,18 +230,17 @@ def process_solo_equiv_fare(iter_dir, demand_db, supply_db, result_db, folder,fo
         
 def process_elder_request_agg(iter_dir, trip_multiplier, supply_db, result_db, demand_db,folder, config:PostProcessingConfig, **kwargs):
         dir = iter_dir
-        req_df= pd.read_csv(dir.as_posix() + '/'+'requests.csv')
-        supply_db_path = dir.as_posix() + '/'+ supply_db
-        result_db_path = dir.as_posix() + '/'+ result_db
-
+        
+        
         if os.path.exists(dir.as_posix() + '/'+'tnc_skim_demo.csv') and not config.force_skims:
             t_case_demo_df = pd.read_csv(dir.as_posix() + '/'+'tnc_skim_demo.csv')
         else:
-            with sqlite3.connect(dir.as_posix() + '/'+ demand_db) as conn:
-                conn.cursor().executescript(f"""attach '{supply_db_path}' as a;""")
-                conn.cursor().executescript(f"""attach '{result_db_path}' as b;""")
+            with sqlite3.connect(demand_db) as conn:
+                conn.cursor().executescript(f"""attach '{supply_db}' as a;""")
+                conn.cursor().executescript(f"""attach '{result_db}' as b;""")
                 fleet_size = pd.read_sql("""select (SELECT count(*) as fleet_size FROM TNC_Statistics) as fleet_size, (select count(*) from tnc_request) as requests;""",conn) * trip_multiplier
             
+            req_df= pd.read_csv(dir.as_posix() + '/'+'requests.csv')
             groupings = ['zone', 'vehicles', 'disability', 'race', 'marital_status', 'income', 'age_class']
 
             # Group the dataframe by the specified columns and perform the aggregations
@@ -273,43 +269,56 @@ def process_elder_request_agg(iter_dir, trip_multiplier, supply_db, result_db, d
         return t_case_demo_df
 
 def process_tnc_stat_summary(iter_dir, demand_db,folder, config:PostProcessingConfig, **kwargs):
+    # iter_dir.as_posix() + '/tnc_stat_summary_helper.csv'
+
+    dir = iter_dir
     
-    with  sqlite3.connect(iter_dir.as_posix()+ '/'+demand_db) as conn:
-        df = pd.read_sql("select * from tnc_stat_summary_helper",conn)
-    #served_requests = df.dropna(subset=['assigned_vehicle'])
-    df['assigned_vehicle'] = df['assigned_vehicle'].apply(lambda x: 0 if pd.isna(x) else 1)
-    scale_factor = get_scale_factor(iter_dir,config)
-    assigned_vehicles = df['assigned_vehicle'].sum()*scale_factor
-    requests = df['assigned_vehicle'].count()*scale_factor
-    df = df.drop(df[df['assigned_vehicle']==0].index)
-    columns_to_sum = [
-        'wait_min',
-        'ttime',
-        'discount',
-        'fare',
-        'pooled',
-        'eVMT_perc',
-        'occupied_VMT',
-        'VMT',
-        'mileage_AVO',
-        'mileage_rAVO',
-        'trip_AVO',
-        'trip_rAVO',
-        'operating_cost',
-        'revenue'
-        ]
-    summary_df = df[columns_to_sum].agg(['sum','mean', 'std', 'count']).transpose().reset_index()
-    summary_df= pd.concat([summary_df,pd.DataFrame({'index': 'assigned_requests','sum':assigned_vehicles},index=[0])])
-    summary_df= pd.concat([summary_df,pd.DataFrame({'index': 'requests','sum':requests},index=[0])])
-    # Rename columns for clarity
-    summary_df.columns = ['Metric', 'Sum', 'Mean', 'StdDev', 'SampleSize']
-    summary_df = summary_df.assign(folder=folder).reset_index()
-    summary_df=summary_df.drop(columns=['index'])
-    summary_df.to_csv(iter_dir.as_posix() + '/tnc_stat_summary_helper.csv')
+        
+    if os.path.exists(dir.as_posix() + '/tnc_stat_summary_helper.csv') and not config.force_skims:
+        summary_df = pd.read_csv(dir.as_posix() + '/tnc_stat_summary_helper.csv')
+    else:
+
+        with  sqlite3.connect(demand_db) as conn:
+            df = pd.read_sql("select * from tnc_stat_summary_helper",conn)
+        #served_requests = df.dropna(subset=['assigned_vehicle'])
+        df['assigned_vehicle'] = df['assigned_vehicle'].apply(lambda x: 0 if pd.isna(x) else 1)
+        scale_factor = get_scale_factor(iter_dir,config)
+        assigned_vehicles = df['assigned_vehicle'].sum()*scale_factor
+        requests = df['assigned_vehicle'].count()*scale_factor
+        df = df.drop(df[df['assigned_vehicle']==0].index)
+        columns_to_sum = [
+            'wait_min',
+            'ttime',
+            'discount',
+            'fare',
+            'pooled',
+            'eVMT_perc',
+            'occupied_VMT',
+            'VMT',
+            'mileage_AVO',
+            'mileage_rAVO',
+            'trip_AVO',
+            'trip_rAVO',
+            'operating_cost',
+            'revenue'
+            ]
+        summary_df = df[columns_to_sum].agg(['sum','mean', 'std', 'count']).transpose().reset_index()
+        summary_df= pd.concat([summary_df,pd.DataFrame({'index': 'assigned_requests','sum':assigned_vehicles},index=[0])])
+        summary_df= pd.concat([summary_df,pd.DataFrame({'index': 'requests','sum':requests},index=[0])])
+        # Rename columns for clarity
+        summary_df.columns = ['Metric', 'Sum', 'Mean', 'StdDev', 'SampleSize']
+        summary_df = summary_df.assign(folder=folder).reset_index()
+        summary_df=summary_df.drop(columns=['index'])
+        summary_df.to_csv(iter_dir.as_posix() + '/tnc_stat_summary_helper.csv')
     return summary_df
 
-def process_demo_financial_case_data(iter_dir, demand_db, result_db, request_file_name, trip_multiplier, config:PostProcessingConfig, **kwargs):
-
+def process_demo_financial_case_data(iter_dir, demand_db, result_db,folder, request_file_name, trip_multiplier, config:PostProcessingConfig, **kwargs):
+    dir = iter_dir
+    if os.path.exists(dir.as_posix() +"/request_case_summary.csv"):
+         req_case_sum = pd.read_csv(dir.as_posix() +"/request_case_summary.csv")
+         return req_case_sum
+    
+    
     ride_min_min = 5
     per_min_min=1.4
     per_mile_min=0.51
@@ -328,8 +337,8 @@ def process_demo_financial_case_data(iter_dir, demand_db, result_db, request_fil
     req_case_sum = pd.DataFrame()
 
 
-    with sqlite3.connect(iter_dir.as_posix() + '/'+ result_db) as conn:
-        conn.cursor().executescript(f"""attach database '{iter_dir.as_posix()+'/'+demand_db}' as a;""");
+    with sqlite3.connect(result_db) as conn:
+        conn.cursor().executescript(f"""attach database '{demand_db}' as a;""");
         requests = pd.read_sql("""select (SELECT count(*) as fleet_size FROM TNC_Statistics) as fleet_size, (select count(*) from tnc_request) as requests;""",conn) * trip_multiplier
         rev_vht_vmt = pd.read_sql(f"""select sum(end-start)/60 as revenue_minutes_traveled, sum(travel_distance)/1609.34 as revenue_miles_traveled from tnc_trip where passengers >0""",conn)*trip_multiplier
         
@@ -338,7 +347,7 @@ def process_demo_financial_case_data(iter_dir, demand_db, result_db, request_fil
         
     dir_name = os.path.split(os.path.split(iter_dir.absolute())[0])[1]
     iteration_num = iter_dir.name.split('_')[-1]
-    req_df = pd.read_csv(iter_dir.as_posix()+'/'+request_file_name).assign(folder=dir_name+ f'_{iteration_num}')
+    req_df = pd.read_csv(iter_dir.as_posix()+'/'+request_file_name).assign(folder=folder)
     req_df['pay_1_a_calc'] = req_df['skim_dist']*per_mile_min+req_df['skim_time']*per_min_min
     req_df['pay_1_a_act']=req_df['pay_1_a_calc'].apply(lambda x: x if x >= 5 else 5)
     #get the fare for case 1 from the request summary row
@@ -370,18 +379,20 @@ def process_demo_financial_case_data(iter_dir, demand_db, result_db, request_fil
     'revenue per request': x['corrected fare'].sum() * trip_multiplier / requests['requests'].iloc[0],
     'revenue_minutes_traveled': rev_vht_vmt['revenue_minutes_traveled'].iloc[0],  # Extract scalar value
     'revenue_miles_traveled': rev_vht_vmt['revenue_miles_traveled'].iloc[0],  # Extract scalar value
-    'folder': dir_name + f'_{iteration_num}',
+    'folder': folder,
     })).reset_index()
 
 
     req_case_sum = pd.concat([req_case_sum,req_sum_df])
     req_case_sum['uber take']=req_case_sum['total_fare']*uber_take
+    req_case_sum.to_csv(dir.as_posix() +"/request_case_summary.csv",index=False)
     return req_case_sum
 
 def process_tnc_repositioning_success_rate(iter_dir, demand_db, supply_db, result_db, folder, trip_multiplier, config, **kwargs):
     #get the trips df
-    iteration_num = iter_dir.name.split('_')[-1]
-    dir_name = os.path.split(os.path.split(iter_dir.absolute())[0])[1] + f'_{iteration_num}'
+    if os.path.exists(iter_dir.as_posix()+"/repositioning_success.csv"):
+        return pd.read_csv(iter_dir.as_posix()+"/repositioning_success.csv")
+
     repo_interval = get_repositioning_interval(iter_dir, config)
     query = f"""select 
                 a.vehicle, 
@@ -398,8 +409,8 @@ def process_tnc_repositioning_success_rate(iter_dir, demand_db, supply_db, resul
                 left join location c
                 on a.destination = c.location;"""
     
-    with sqlite3.connect(iter_dir.as_posix() + '/'+ demand_db) as conn:
-        conn.cursor().executescript(f"""attach database '{iter_dir.as_posix()+'/'+supply_db}' as a;""");
+    with sqlite3.connect(demand_db) as conn:
+        conn.cursor().executescript(f"""attach database '{supply_db}' as a;""");
         trips_df = pd.read_sql(query, conn)
 
     # Ensure trips are sorted
@@ -449,10 +460,12 @@ def process_tnc_repositioning_success_rate(iter_dir, demand_db, supply_db, resul
 
     # Create a summary dataframe
     summary_df = pd.DataFrame(results)
-    summary_df['folder'] = dir_name
+    summary_df['folder'] = folder
+    summary_df.sort_values(by="hour").reset_index(drop=True)
+    summary_df.to_csv(iter_dir.as_posix()+"/repositioning_success.csv",index=False)
 
     # Optional: sort by hour
-    return summary_df.sort_values(by="hour").reset_index(drop=True)
+    return summary_df
     
     
     

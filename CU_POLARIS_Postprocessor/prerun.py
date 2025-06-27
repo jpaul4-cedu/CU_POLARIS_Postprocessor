@@ -9,33 +9,40 @@ import pandas as pd
 
 
 
-def pre_run_checks(config:PostProcessingConfig):
+def pre_run_checks(config:PostProcessingConfig, skip_contains = None):
     # Validate there is a sql query for each sql based table we want
     
     #check if all the runs are complete
+    path = config.base_dir.resolve()
+    config.update_config(base_dir=path)
     parent_folder = config.base_dir
     folders = [Path(os.path.join(parent_folder, f)) for f in os.listdir(parent_folder) if (os.path.isdir(os.path.join(parent_folder, f)) and not f.endswith("_UNFINISHED"))]
-    
+    folders = [folder for folder in folders if all(_ not in folder.as_posix() for _ in config.ignore_folders) and not folder.as_posix() == config.analysis_folder]
+    config.unique_folders = folders
     
     unfinished =[]
-    for folder in folders:
-        dir = get_highest_iteration_folder(folder)
-        if not os.path.exists(os.path.join(dir,"finished")):
-            unfinished.append(folder)
+    for folder in config.unique_folders:
+        subdirs = os.listdir(folder)
+        if any("iteration" in sub_dir for sub_dir in subdirs):
+            dir = get_highest_iteration_folder(folder)
+            if os.path.exists(os.path.join(dir,"finished")):
+                continue
+        unfinished.append(folder)
+
             
 
     if len(unfinished) > 0:
-        config.unfinished.append(unfinished)
+        for item in unfinished:
+            config.unfinished.append(item)
         return False
 
 
 
-    path = config.base_dir.resolve()
-    config.update_config(base_dir=path)
+    
     cats = separate_keys_by_value(config.desired_outputs)
     sql_cats = cats['sql']
 
-    queries = get_sql_create('dummy','dummy','dummy')
+    queries = get_sql_create(supply_db='dummy',trip_multiplier='dummy',result_db='dummy')
     missing_items = [item for item in sql_cats if item not in queries]
         
     if missing_items:
@@ -48,15 +55,14 @@ def pre_run_checks(config:PostProcessingConfig):
     csvs_exist = True
     results = {}
     folders = []
-    run_dirs = [Path(d)  for d in glob.glob(config.base_dir.as_posix() + "/*/")]
-    tmp =[]
-    for dir in run_dirs:
-        if not dir.as_posix().endswith("UNFINISHED"):
-            tmp.append(dir)
-    
-    run_dirs = tmp
         
-    
+    skip_items = []
+    if not skip_contains is None:
+        print(f"Skipping folders with names containing {skip_contains}")
+        for item in config.unique_folders:
+            if skip_contains in item.as_posix():
+                skip_items.append(item)
+        
     
     for outer_key, items in cats.items():
         if outer_key == 'sql_helper':
@@ -64,7 +70,7 @@ def pre_run_checks(config:PostProcessingConfig):
                 sql_tables.insert(0,item)        
         elif outer_key in ['sql', 'postprocessing']:
             for item in items:
-                csv_path = Path(config.base_dir.as_posix() + "/" + item + ".csv")
+                csv_path = Path(config.analysis_folder + "/" + item + ".csv")
                 if item not in output_csvs_exists:
                     output_csvs_exists[item] = {}
                 output_csvs_exists[item]['type'] = outer_key
@@ -82,10 +88,10 @@ def pre_run_checks(config:PostProcessingConfig):
                 
         elif outer_key == 'postprocessing_helper':
             for item in items:
-                for dir in run_dirs:
+                for dir in config.unique_folders:
                     iter_dir = get_highest_iteration_folder(dir)
                     try:
-                        csv_path = Path(iter_dir.as_posix() + '/' + item + '.csv')
+                        csv_path = Path(config.analysis_folder + '/' + item + '.csv')
                         dir_name = os.path.split(os.path.split(iter_dir.absolute())[0])[1]
                     except:
                         raise FileNotFoundError(f"The folder, {dir}, does not appear to have the correct iteration folder. Please remove any non-case folders from the analysis directory.")
@@ -109,7 +115,7 @@ def pre_run_checks(config:PostProcessingConfig):
     unique_folders = [list(tpl) for tpl in unique_tuples]    
     unique_folders = [item for sublist in unique_folders for item in sublist]
     if len(unique_folders)>0:
-        for dir in run_dirs:
+        for dir in config.unique_folders:
             try:
                 name = dir.name
                 result = check_value_in_list(name,unique_folders)
@@ -119,7 +125,7 @@ def pre_run_checks(config:PostProcessingConfig):
         # remove helper queries if all
     config.update_config(csvs=output_csvs_exists)
     config.update_config(sql_tables=sql_tables)
-    config.update_config(unique_folders=unique_folders)
+    #config.update_config(unique_folders=unique_folders)
     config.update_config(results=results)
     all_csvs_exist = True
     for key, value in output_csvs_exists.items():

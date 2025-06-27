@@ -59,7 +59,7 @@ def process_folder_names_rl_repo(config:PostProcessingConfig):
         df['Repo_Weight'] = df['folder_2_3'].apply(lambda x: x if x.isnumeric() else 'N/A')
         df = df.rename(columns={'folder_1': 'City', 'folder_2_1': 'Fleet Size', 'folder_2_4': 'Iteration'})
         # Drop unnecessary columns
-        df.drop(columns=['folder_2_3', 'folder_2_4','folder_2','folder_2_2'], inplace=True)
+        df.drop(columns=['folder_2_3','folder_2','folder_2_2'], inplace=True)
 
         results[key]=df
     config.update_config(results=results)

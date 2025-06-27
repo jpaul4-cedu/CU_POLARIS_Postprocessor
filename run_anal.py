@@ -19,11 +19,12 @@ def run_anal(config_wtp:PostProcessingConfig):
     if not state:
         unfinished = config_wtp.unfinished
         proceed = input(f"{len(unfinished)} unfinished directories in output. Proceed without? [y/n]")
+        #proceed = "y"
         if proceed == "y":
             for file in unfinished:
                 if not file.as_posix().endswith("_UNFINISHED"):
                     os.rename(file,file.as_posix()+"_UNFINISHED")
-                prerun.pre_run_checks(config_wtp)
+            prerun.pre_run_checks(config_wtp)
         else:
             raise ValueError("Unfinished cases in analysis directory.")
     parallel.parallel_process_folders(config_wtp)
@@ -31,6 +32,7 @@ def run_anal(config_wtp:PostProcessingConfig):
     #use this for comparing all cases (within a city model) to a single base case
     #base_case_folders = ['gsc_300_jar','gvl_du_7']
     #prep_utils.process_tnc_ttests(config=config_wtp,base_cases=base_case_folders)
+
 
     #Use this for comparing strategy to strategy
     prep_utils.process_tnc_ttests(config=config_wtp,base_suffix="_nr")
@@ -68,16 +70,51 @@ def run_pbix(config_wtp:PostProcessingConfig):
     pbix_charting.open_pbix_file(config_wtp.base_dir,study_name)
 
 def __main__():
+    desired_outputs = {
+            'transit_trip_max_load_helper':'sql',
+            'attach':'sql_helper',         
+            'transit_trip_max_load':'sql',
+            'mode_Distribution_ADULT_Counts':'sql',
+            'mode_Distribution_ADULT_Distance':'sql',
+            'bus_avo':'sql',
+            'pr_avo':'sql',
+            'fare_sensitivity_results':'sql',
+            'mode_Distribution_ADULT':'sql',
+            'distance_tnc_dist':'sql',
+            'fare_sensitivity_results_zonal':'sql',
+            'fare_sensitivity_demograpic_tnc_stats':'sql',
+            'fare_sensitivity_results_vo':'sql',
+            'tnc_results_discount':'sql',
+            'elder_demo':'sql',
+            'requests': 'postprocessing_helper',
+            'requests_sum_helper':'postprocessing_helper',
+            'requests_sum': 'postprocessing',
+            #'closest_stops_helper':'postprocessing_helper',
+            #'closest_stops':'postprocessing',
+            'tnc_stat_summary_helper':'postprocessing_helper',
+            'tnc_stat_summary':'postprocessing',
+            'repositioning_success_rate':'postprocessing',
+            'tnc_skim_demo':'postprocessing',
+            'tnc_stat_summary_helper':'sql_helper',
+            'demo_financial_case_data':'postprocessing',
+            'activity_times': 'sql'
+        }
+
+
     config_wtp=PostProcessingConfig(base_dir=Path(r"/scratch/jpaul4/repositioning/rl_repo_data/for_anal/"),
                                     output_h5=True,
                                     fresh_start=False,
-                                    reset_csvs=True,
-                                    reset_sql=True,
-                                    reset_stops=True, 
-                                    db_names=['greenville','campo'],
+                                    reset_csvs=False,
+                                    reset_sql=False,
+                                    reset_stops=False, 
+                                    db_names=['greenville','austin'],
                                     scenario_file_names=['scenario_abm_jar.json','scenario_abm_default_repo.json','scenario_abm_no_repo.json','scenario_abm.json'],
                                     fleet_model_file_names=['TNCFleetModel_joint_proactive_repo.json','TNCFleetModel_proactive_default_repo.json','TNCFleetModel_proactive_no_repo.json'],
-                                    parallel=True)
+                                    parallel=False,
+                                    ignore_folders=["run","log"],
+                                    analysis_folder="analysis_output",
+                                    desired_outputs=desired_outputs
+                                    )
     run_anal(config_wtp)
     run_pbix(config_wtp)
    # pbix_charting.create_pbix_path_query()
