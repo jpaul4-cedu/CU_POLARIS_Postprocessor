@@ -86,3 +86,5 @@ cython_debug/
 
 # Pyright
 .pyright/
+
+.rl_repo_work
