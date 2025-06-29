@@ -62,23 +62,37 @@ def fxn():
 
 fxn()
 
-def get_highest_iteration_folder(base_folder):
+def get_highest_iteration_folder(base_folder, finished_only: bool = True, return_single:bool = True):
     pattern = re.compile(r'^(.*)_iteration_(\d+)?$')
     highest_n = -2
     iter_folder = None
-
     for folder_name in os.listdir(base_folder):
+        full_dir = os.path.join(base_folder,folder_name)
+        if not os.path.isdir(full_dir):
+            continue
         match = pattern.match(folder_name)
         if match:
-            try:
-                n = int(match.group(2))
-            except:
-                n = -1
+            files = os.listdir(full_dir)
+            hold = match.group(2)
+            if "finished" in files or not finished_only:
+                try:
+                    n = int(match.group(2))
+                except:
+                    n = -1
+                if n > highest_n:
+                    highest_n = n
+                    iter_folder = Path(os.path.join(base_folder, folder_name))
+        elif "abm_init_iteration" in full_dir and os.path.isdir(full_dir) and ("finished" in os.listdir(full_dir) or not finished_only):
+            n =0
             if n > highest_n:
-                highest_n = n
+                highest_n = 0
                 iter_folder = Path(os.path.join(base_folder, folder_name))
-
-    return iter_folder
+        else:
+            hold2 = os.listdir(full_dir)
+    if return_single:
+        return iter_folder
+    else:
+        return iter_folder, highest_n
 
 def get_scale_factor(dir, config:PostProcessingConfig):
     if not isinstance(dir,Path):
@@ -159,6 +173,8 @@ def get_scale_factor_and_fleet_size(dir, config:PostProcessingConfig):
 
 def get_timeperiods(dir):
     def _process_omx(time_perios_loc): 
+        if not os.path.isfile(time_perios_loc):
+            time_perios_loc = os.path.join
         with omx.open_file(time_perios_loc, 'r') as omx_file:
         # List all the matrices in the OMX file
         
@@ -608,10 +624,12 @@ def update_new_scenarios(new_cases:list, combinations:list, new_case_path:str, f
             j+=1
         i+=1
 
-def create_tasks(moves:dict):
+def create_tasks(moves:dict, force:bool = False):
     copy_tasks = []
     del_tasks = []
     platform = get_platform_info()
+    if force and platform == "Windows":
+        warnings.warn("Force not set up for windows.")
     for key, items in moves.items():
         if key == "copy":
             tasks = []
@@ -630,13 +648,16 @@ def create_tasks(moves:dict):
                 if platform == 'Windows':
                     action = ['del',old_path]
                 else:
-                    action = ' '.join(['rm -r',f"\"{Path(old_path).as_posix()}\""])
+                    if force:
+                        action = ' '.join(['rm -rf',f"\"{Path(old_path).as_posix()}\""])
+                    else:
+                        action = ' '.join(['rm -r',f"\"{Path(old_path).as_posix()}\""])
                 del_tasks.append(action)
     return copy_tasks, del_tasks
 
-def run_tasks(parallel:bool = True, copy_tasks:list = [], del_tasks:list = []):
+def run_tasks(parallel:bool = True, copy_tasks:list = [], del_tasks:list = [], use_tqdm:bool = True,max_threads_x2:bool = False):
     # Set max_workers to the number of cores on the machine
-    max_workers = os.cpu_count()+4
+    max_workers = os.cpu_count()+4 if not max_threads_x2 else os.cpu_count()*2
     platform = get_platform_info()
     if parallel:
         if platform == 'Windows':
@@ -645,10 +666,16 @@ def run_tasks(parallel:bool = True, copy_tasks:list = [], del_tasks:list = []):
             with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                 list(tqdm(executor.map(call_ps_action, copy_tasks),total=len(copy_tasks),desc="Moving/Copying Items")) 
         else:
-            with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                list(tqdm(executor.map(execute_task, del_tasks),total=len(del_tasks),desc="Deleting Items"))
-            with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                list(tqdm(executor.map(execute_task, copy_tasks),total=len(copy_tasks),desc="Moving/Copying Items"))
+            if use_tqdm:
+                with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    list(tqdm(executor.map(execute_task, del_tasks),total=len(del_tasks),desc="Deleting Items"))
+                with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    list(tqdm(executor.map(execute_task, copy_tasks),total=len(copy_tasks),desc="Moving/Copying Items"))
+            else:
+                with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    executor.map(execute_task, del_tasks)
+                with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    executor.map(execute_task, copy_tasks)
     else:
         if platform == 'Windows':
             for action in del_tasks:
@@ -702,9 +729,11 @@ class PolarisRunConfig():
             city.city_total_time = f"""{hr}:{int(min) if len(str(int(min)))==2 else "0"+str(int(min))}:00"""
         
 
-def create_jobscript(job_name:str = "",nodes:int =1,cpus_per_task:int = 8,
+def create_jobscript(job_name:str = "",nodes:int =1,cpus_per_task:int = None,
                      mail_user:str="", mail_type: MailType = MailType.NONE,case_dir:str = "",config:PolarisRunConfig = None, redo_files = [], custom_foot = None):
     
+    
+        
     citykeys = config.cities
 
     if case_dir == "":
@@ -747,9 +776,11 @@ def create_jobscript(job_name:str = "",nodes:int =1,cpus_per_task:int = 8,
             city_info = city_dict[city]
             time = city_info.city_total_time
             mem_per_task = city_info.city_mem
+            if cpus_per_task is None:
+                cpus_per_task = max(int(mem_per_task/4),8)
 
         jobscript_header = \
-        f"""#!/bin/bash\n#SBATCH --job-name={job_name}\n#SBATCH --nodes={nodes}\n#SBATCH --time={time}\n#SBATCH --cpus-per-task={cpus_per_task}\n#SBATCH --mem={mem_per_task}gb\n#SBATCH --mail-user={mail_user}"""
+        f"""#!/bin/bash\n#SBATCH --job-name={job_name + city}\n#SBATCH --nodes={nodes}\n#SBATCH --time={time}\n#SBATCH --cpus-per-task={cpus_per_task}\n#SBATCH --mem={mem_per_task}gb\n#SBATCH --mail-user={mail_user}"""
             #SBATCH --mail-type={mail_type}"""
 
         case_cnt = len(formatted_paths.splitlines())

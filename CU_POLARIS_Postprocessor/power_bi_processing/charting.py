@@ -340,6 +340,7 @@ class mode_shift_queries():
                 "31":"MICROM_AND_TRANSIT",
                 "32":"MICROM_NODOCK_AND_TRANSIT",
                 "33":"ODDELIVERY",
+                "34":"DUMMY REPOSITIONING",
                 "999":"FAIL_MODE",
                 "1000":"FAIL_ROUTE",
                 "1001":"FAIL_REROUTE",

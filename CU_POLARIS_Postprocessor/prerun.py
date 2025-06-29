@@ -1,4 +1,4 @@
-from .utils import separate_keys_by_value, get_highest_iteration_folder, check_value_in_list
+from .utils import separate_keys_by_value, get_highest_iteration_folder, check_value_in_list, get_db_name, get_scale_factor
 from .clean import clean_analysis
 from .queries import get_sql_create
 from pathlib import Path
@@ -6,7 +6,9 @@ import glob
 import os
 from .config import PostProcessingConfig
 import pandas as pd
-
+import tarfile
+import threading
+import sqlite3
 
 
 def pre_run_checks(config:PostProcessingConfig, skip_contains = None):
@@ -36,7 +38,14 @@ def pre_run_checks(config:PostProcessingConfig, skip_contains = None):
             config.unfinished.append(item)
         return False
 
-
+    threads = []
+    for folder in config.unique_folders:
+        if config.parallel:
+            th = threading.Thread(target=check_dbs, kwargs={"dir":folder, "config":config})
+            th.start()
+            threads.append(th)
+        else:
+            check_dbs(folder,config)
 
     
     cats = separate_keys_by_value(config.desired_outputs)
@@ -148,8 +157,70 @@ def pre_run_checks(config:PostProcessingConfig, skip_contains = None):
         clean_analysis(config)
         config.update_config(fresh_start=False)
 
-        
+        if config.parallel:
+            for thread in threads:
+                thread.join()
         return pre_run_checks(config)
     else:
+        if config.parallel:
+            for thread in threads:
+                thread.join()
         return True
 
+def check_dbs(dir, config:PostProcessingConfig):
+    base = dir
+    dir = get_highest_iteration_folder(dir)
+   
+    db_name = get_db_name(dir,config) 
+    demand_db = db_name + "-Demand.sqlite"
+    #result_db = f"{db_name}-Result.sqlite"
+    result_db = db_name + "-Result.sqlite"
+    supply_db = db_name + "-Supply.sqlite"
+    
+    
+    dbs = {"demand":demand_db,"result":result_db,"supply":supply_db}
+    db_paths = {}
+    for key, item in dbs.items():
+        item_path = os.path.join(dir,item)
+        if not os.path.isfile(item_path):
+            parent_dir = os.path.abspath(os.path.join(os.path.join(dir,os.pardir),item))
+            if os.path.isfile(parent_dir):
+                shutil.copy(parent_dir,item_path)
+            else:
+                tar_path = item_path + ".tar.gz"
+                if not os.path.exists(tar_path):
+                    tar_path = parent_dir + ".tar.gz"
+                    if not os.path.exists(tar_path):
+                        raise FileNotFoundError(f"Cannot find output database {item} in folder {dir.as_posix()}.")
+                print(f"decompressing {tar_path}\{item}")
+                with tarfile.open(tar_path,'r:gz') as tar:
+                    tar.extract(item, dir)
+        
+        db_ok = check_sqlite_database_validity(item_path)
+        if not db_ok:
+            raise FileNotFoundError("DB is malformed.")
+        db_paths[key] = item_path
+
+
+    
+    db_paths["trip_multiplier"]= get_scale_factor(dir,config)
+    config.folder_db_map[dir]=db_paths
+    #print(f"DBs validated for {d}")
+
+def check_sqlite_database_validity(db_path):
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        # Run a simple query to check database integrity
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tables = cursor.fetchall()
+
+        return True
+
+    except sqlite3.DatabaseError as e:
+        return False
+
+    finally:
+        if 'conn' in locals():
+            conn.close()

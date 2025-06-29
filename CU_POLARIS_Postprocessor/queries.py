@@ -70,24 +70,24 @@ def get_sql_create(supply_db=None,trip_multiplier=None,result_db=None,config:Pos
     "pr_avo": f"""
         CREATE TABLE if not exists pr_avo AS
         select * from (
-        (select count(*) * {trip_multiplier} as cnt_pool, sum(travel_distance/1609.34) * {trip_multiplier} as dist_pool from tnc_trip where passengers > 1),
-        (select count(*) * {trip_multiplier} as cnt_solo, sum(travel_distance/1609.34) * {trip_multiplier} as dist_solo from tnc_trip where passengers = 1),
-        (select count(*) * {trip_multiplier} as cnt_empt, sum(travel_distance/1609.34) * {trip_multiplier} as dist_empt from tnc_trip where passengers < 1));
+        (select count(*) * {trip_multiplier} as cnt_pool, sum(travel_distance/1609.34) * {trip_multiplier} as dist_pool from (select a.*, b.service_type from tnc_trip a left join tnc_request b on a.request = b.tnc_request_id) where (case when service_type = 99 then 0 else passengers end) > 1),
+        (select count(*) * {trip_multiplier} as cnt_solo, sum(travel_distance/1609.34) * {trip_multiplier} as dist_solo from (select a.*, b.service_type from tnc_trip a left join tnc_request b on a.request = b.tnc_request_id) where (case when service_type = 99 then 0 else passengers end) = 1),
+        (select count(*) * {trip_multiplier} as cnt_empt, sum(travel_distance/1609.34) * {trip_multiplier} as dist_empt from (select a.*, b.service_type from tnc_trip a left join tnc_request b on a.request = b.tnc_request_id) where (case when service_type = 99 then 0 else passengers end) < 1));
     """,
     "fare_sensitivity_results": f"""
         CREATE TABLE if not exists fare_sensitivity_results AS SELECT *, t3.evmt * 1.0 / t4.sav_vmt as perc_evmt, t4.sav_vmt * 1.0 / t2.requests_served as vmt_per_r, t6.sav_vht * 60.0 / t2.requests_served as vht_per_r, t2b.repo_requests_served FROM 
         (SELECT count(*) * {trip_multiplier} as fleet_size, avg(tot_dropoffs) as avg_trips FROM TNC_Statistics) as t1,
         (SELECT avg(pickup_time - request_time)/60 as wait_min, avg(dropoff_time - request_time)/60 as ttime_min, count(*) * {trip_multiplier} as requests_served FROM TNC_Request where assigned_vehicle is not null and service_type <> 99) as t2,
         (SELECT count(*) * {trip_multiplier} as repo_requests_served from TNC_Request where assigned_vehicle is not null and service_type = 99) as t2b,
-        (SELECT sum(travel_distance)/1609.34 * {trip_multiplier} as evmt FROM  TNC_Trip where passengers = 0) as t3,
+        (SELECT sum(a.travel_distance)/1609.34 * {trip_multiplier} as evmt FROM  TNC_Trip a left join tnc_request b on a.request = b.tnc_request_id where (case when b.service_type = 99 then 0 else a.passengers end) = 0) as t3,
         (SELECT sum(travel_distance)/1609.34 * {trip_multiplier} as sav_vmt FROM TNC_Trip) as t4,
-        (SELECT sum(travel_distance * passengers) * 1.0 / sum(travel_distance ) as AVO FROM TNC_Trip) as t5,
-        (SELECT sum(travel_distance * passengers) * 1.0 / sum(travel_distance ) as rAVO FROM TNC_Trip WHERE passengers > 0) as t8,
+        (SELECT sum(a.travel_distance * (case when b.service_type = 99 then 0 else a.passengers end)) * 1.0 / sum(travel_distance ) as AVO FROM TNC_Trip a left join tnc_request b on a.request = b.tnc_request_id) as t5,
+        (SELECT sum(a.travel_distance * (case when b.service_type = 99 then 0 else a.passengers end)) * 1.0 / sum(travel_distance ) as rAVO FROM TNC_Trip a left join tnc_request b on a.request = b.tnc_request_id where (case when b.service_type = 99 then 0 else a.passengers end) > 0) as t8,
         (SELECT sum(end - start)/3600 * {trip_multiplier} as sav_vht FROM TNC_Trip) as t6,
         (SELECT count(distinct TNC_Request_id) * {trip_multiplier} as unserved_requests FROM TNC_Request WHERE assigned_vehicle is null and service_type <>99) as t7,
         (SELECT sum(travel_distance)/1609.34 * {trip_multiplier} as sov_vmt, sum(end-start)/3600 * {trip_multiplier} as sov_vht FROM trip where mode = 0) as t8,
-        (select ((select sum(passengers) from tnc_trip) * 1.0 / (select count(*) from tnc_request)) as trip_avo) as t9,
-        (select ((select sum(passengers) from tnc_trip where passengers > 0) * 1.0 / (select count(distinct request) from tnc_trip)) as trip_ravo) as t10;
+        (select ((select sum(case when b.service_type = 99 then 0 else a.passengers end) from tnc_trip a left join tnc_request b on a.request = b.tnc_request_id) * 1.0 / (select count(*) from tnc_request)) as trip_avo) as t9,
+        (select ((select sum(case when b.service_type = 99 then 0 else a.passengers end) from tnc_trip a left join tnc_request b on a.request = b.tnc_request_id where passengers > 0) * 1.0 / (select count(distinct request) from tnc_trip)) as trip_ravo) as t10;
     """,
     "mode_Distribution_ADULT": f"""
         CREATE TABLE IF NOT EXISTS mode_Distribution_ADULT As
@@ -103,10 +103,10 @@ def get_sql_create(supply_db=None,trip_multiplier=None,result_db=None,config:Pos
         group by mode, zone;
     """,
     "distance_tnc_dist": f"""CREATE TABLE if not exists distance_tnc_dist AS
-        SELECT cast(distance*2 as int)/2 as binned_dist, count(*) * {trip_multiplier} as num_trips FROM TNC_Request WHERE assigned_vehicle is not null GROUP by binned_dist;
+        SELECT cast(distance*2 as int)/2 as binned_dist, count(*) * {trip_multiplier} as num_trips, service_type FROM TNC_Request WHERE assigned_vehicle is not null GROUP by binned_dist;
         """,
     "fare_sensitivity_results_zonal":f"""
-        CREATE TABLE if not exists fare_sensitivity_results_zonal AS select a.zone, a.area_type, a.wait_min, a.ttime_min, a. requests_served, unserved_requests, fare 
+        CREATE TABLE if not exists fare_sensitivity_results_zonal AS select a.zone, a.area_type, a.wait_min, a.ttime_min, a.requests_served, unserved_requests, fare 
         from (SELECT zone.zone, zone.area_type, avg(pickup_time - request_time)/60 as wait_min, avg(dropoff_time - request_time)/60 as ttime_min, count(*) * {trip_multiplier} as requests_served, sum(fare) as fare
         FROM TNC_Request left join location on tnc_request.origin_location = location.location left join zone on location.zone = zone.zone where assigned_vehicle is not null and service_type <> 99
         group by zone.zone) as a left join 
@@ -210,18 +210,18 @@ def get_sql_create(supply_db=None,trip_multiplier=None,result_db=None,config:Pos
         "tnc_results_discount":f"""
         CREATE TABLE if not exists tnc_results_discount AS
         SELECT 
-        (select cast(count(case when pooled = 0 then 1 end) as float) / cast(count(*) as float) from (select request, case when (max_pass - party_size) > 0 then 1 else 0 end as pooled from (select a.request, max(a.passengers) as max_pass, b.party_size from tnc_trip a left join tnc_request b  on a.request = b.TNC_request_id group by a.request)))  as solo_perc,
-        (select cast(count(case when pooled = 1 then 1 end) as float) / cast(count(*) as float) from (select request, case when (max_pass - party_size) > 0 then 1 else 0 end as pooled from (select a.request, max(a.passengers) as max_pass, b.party_size from tnc_trip a left join tnc_request b  on a.request = b.TNC_request_id group by a.request))) as pooled_perc,
+        (select cast(count(case when pooled = 0 then 1 end) as float) / cast(count(*) as float) from (select request, case when (max_pass - party_size) > 0 then 1 else 0 end as pooled from (select a.request, max(a.passengers) as max_pass, b.party_size from tnc_trip a left join tnc_request b  on a.request = b.TNC_request_id where b. service_type <> 99 group by a.request)))  as solo_perc,
+        (select cast(count(case when pooled = 1 then 1 end) as float) / cast(count(*) as float) from (select request, case when (max_pass - party_size) > 0 then 1 else 0 end as pooled from (select a.request, max(a.passengers) as max_pass, b.party_size from tnc_trip a left join tnc_request b  on a.request = b.TNC_request_id where b.service_type <> 99 group by a.request))) as pooled_perc,
         (SELECT SUM(fare) *{trip_multiplier} FROM tnc_request) as fare,
-        (SELECT AVG(passengers) FROM tnc_trip) as AVO,
-        (SELECT AVG(CASE WHEN passengers > 0 THEN passengers END) FROM tnc_trip) as rAVO,
+        (SELECT AVG(case when b.service_type = 99 then 0 else a.passengers end) FROM tnc_trip a left join tnc_request b  on a.request = b.TNC_request_id) as AVO,
+        (SELECT AVG(CASE WHEN a.passengers > 0 THEN a.passengers END) FROM tnc_trip a left join tnc_request b  on a.request = b.TNC_request_id where b.service_type <> 99) as rAVO,
         (SELECT SUM(travel_distance)/1000*0.621371 FROM tnc_trip) as vmt,
-        (SELECT SUM(CASE WHEN passengers = 0 THEN travel_distance END) / SUM(travel_distance) FROM tnc_trip) as evmt_perc,
-        (SELECT cast(count(case when passengers > 1 then 1 end) as float) / cast(count(*) as float) FROM tnc_trip) as pool_per,
+        (SELECT SUM(CASE WHEN a.passengers = 0 or service_type = 99 THEN travel_distance END) / SUM(travel_distance) FROM tnc_trip a left join tnc_request b  on a.request = b.TNC_request_id) as evmt_perc,
+        (SELECT cast(count(case when a.passengers > 1 then 1 end) as float) / cast(count(*) as float) FROM tnc_trip a left join tnc_request b  on a.request = b.TNC_request_id where b.service_type<>99) as pool_per,
         (SELECT SUM(discount)* {trip_multiplier} FROM tnc_request WHERE pooled_service = 1) as pooled_discount,
         (SELECT count(*) * {trip_multiplier} from tnc_request where service_type <> 99) as requests,
         (SELECT count(*) * {trip_multiplier} from tnc_request where service_type = 99 and assigned_vehicle is not null) as repo_requests,
-        (SELECT CAST(count(case when assigned_vehicle is null then 1 end) AS FLOAT) / CAST(count(*) AS FLOAT) FROM tnc_request) AS rejection_rate;""",
+        (SELECT CAST(count(case when assigned_vehicle is null then 1 end) AS FLOAT) / CAST(count(*) AS FLOAT) FROM tnc_request where service_type <> 99) AS rejection_rate;""",
         "elder_demo":f"""CREATE TABLE if not exists elder_demo AS
         SELECT sum(vehicles) as vehicles, e.zone, b.mode, b.type, CASE WHEN c.age > 60 THEN 2 WHEN c.age < 18 THEN 0 ELSE 1 END AS age_class, 
         COUNT(a.trip_id)  AS trip_count, count(d.household) as household_count,
@@ -246,7 +246,7 @@ def get_sql_create(supply_db=None,trip_multiplier=None,result_db=None,config:Pos
         eVMT_perc,
         occupied_VMT*{trip_multiplier} as occupied_VMT,
         VMT*{trip_multiplier} as VMT,
-        passengers,
+        case when service_type =99 then 0 else passengers end as passengers,
         trips*{trip_multiplier} as trips,
         mileage_AVO,
         mileage_rAVO,
@@ -254,7 +254,8 @@ def get_sql_create(supply_db=None,trip_multiplier=None,result_db=None,config:Pos
         trip_rAVO,
         pooled_service,
         operating_cost*{trip_multiplier} as operating_cost,
-        (fare-discount-operating_cost)*{trip_multiplier} as revenue
+        (fare-discount-operating_cost)*{trip_multiplier} as revenue,
+        service_type
 
         from tnc_request a left join 
         (select request,
@@ -285,7 +286,13 @@ def get_sql_create(supply_db=None,trip_multiplier=None,result_db=None,config:Pos
                 passengers*1.0/travel_distance AS mileage_avo, 
                 passengers AS trip_avo, 
                 travel_distance/1609.34 as travel_distance
-            FROM tnc_trip
+            FROM (select 
+                a.tnc_trip_id_int, 
+                a.request, 
+                case when b.service_type = 99 then 0 else a.passengers end as passengers, 
+                a.travel_distance, 
+                b.service_type 
+                from tnc_trip a left join tnc_request b on a.request = b.tnc_request_id)
         ) AS subquery
         GROUP BY request
         ORDER BY request)) b

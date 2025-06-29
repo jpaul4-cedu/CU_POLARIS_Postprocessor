@@ -20,7 +20,7 @@ def parallel_process_folders(config:PostProcessingConfig):
     
 
     # Use ThreadPoolExecutor or ProcessPoolExecutor to process folders in parallel
-    workers = os.cpu_count() + 4
+    workers = os.cpu_count()
     #workers = 1
 
     if config.parallel:
@@ -49,38 +49,10 @@ def parallel_process_folders(config:PostProcessingConfig):
     return True
 
 def process_folder(dir, config:PostProcessingConfig):
-
-    print(f"starting on directory {dir}")
     dir = get_highest_iteration_folder(dir)
-   
-    db_name = get_db_name(dir,config) 
-    demand_db = db_name + "-Demand.sqlite"
-    #result_db = f"{db_name}-Result.sqlite"
-    result_db = db_name + "-Result.sqlite"
-    supply_db = db_name + "-Supply.sqlite"
-    
-    
-    dbs = {"demand":demand_db,"result":result_db,"supply":supply_db}
-    db_paths = {}
-    for key, item in dbs.items():
-        item_path = os.path.join(dir,item)
-        if not os.path.isfile(item_path):
-            parent_dir = os.path.abspath(os.path.join(os.path.join(dir,os.pardir),item))
-            if os.path.isfile(parent_dir):
-                shutil.copy(parent_dir,item_path)
-            else:
-                tar_path = item_path + ".tar.gz"
-                if not os.path.exists(tar_path):
-                    tar_path = parent_dir + ".tar.gz"
-                    if not os.path.exists(tar_path):
-                        raise FileNotFoundError(f"Cannot find output database {item} in folder {dir.as_posix()}.")
-                with tarfile.open(tar_path,'r:gz') as tar:
-                    tar.extractall(path = dir)
-        db_paths[key] = item_path
+    print(f"starting on directory {dir}")
 
-    
-    db_paths["trip_multiplier"]= get_scale_factor(dir,config)
-    config.folder_db_map[dir]=db_paths
+    db_paths = config.folder_db_map[dir]
     supply_db = db_paths["supply"]
     demand_db = db_paths["demand"]
     result_db = db_paths['result']
@@ -99,7 +71,9 @@ def process_folder(dir, config:PostProcessingConfig):
         CREATE INDEX IF NOT EXISTS idx_demand_person_household ON person(household);
         CREATE INDEX IF NOT EXISTS idx_demand_household_household ON household(household);
         CREATE INDEX IF NOT EXISTS idx_demand_household_location ON household(location);"""
-    
+    fix_trip_passengers = "update tnc_trip set passengers = 0  where request in (select tnc_request_id from tnc_request where service_type = 99);"
+    fix_request_party_size = "update tnc_request set party_size = 0 where service_type = 99;"
+
     it = dir.as_posix().split("_")[-1]
     try:
         int(it)
@@ -114,18 +88,31 @@ def process_folder(dir, config:PostProcessingConfig):
     
     results = {}
     if len(config.sql_tables)>0 :
-        try:        
+        #try:        
             with  sqlite3.connect(supply_db) as conn:
                 ### Indexes for elder queries
                 conn.cursor().executescript(index_script_supply)
 
             
             with sqlite3.connect(demand_db) as conn:
-                temp_df = pd.read_sql(f"select * from tnc_request;", conn)
+                temp_df = pd.read_sql(f"select * from tnc_request limit 10;", conn)
                 if temp_df.shape[0] == 0:
                     print(f"No requests in {dir.as_posix()}.")
                     return {}
                 conn.cursor().executescript(index_script_demand)
+                conn.cursor().executescript(fix_trip_passengers)
+                conn.cursor().executescript(fix_request_party_size)
+                temp_df = pd.read_sql(f"select max(party_size) as max_party from tnc_request where service_type = 99;", conn)
+                max_party = temp_df.iat[0,0]
+                if max_party > 0:
+                    raise ValueError(f"Adjustment of request party size did not take for {dir}")
+
+                temp_df = pd.read_sql(f"select max(passengers) as max_pass from tnc_trip a left join tnc_request b on a.request = b.tnc_request_id where b.service_type = 99;", conn)
+                max_pass = temp_df.iat[0,0]
+                if max_pass > 0:
+                    raise ValueError(f"Adjustment of trip passengers did not take for {dir}")
+                temp_df = None
+
                 for query in queries_to_run:
                     conn.cursor().executescript(query)
                 for sql in config.sql_tables:
@@ -135,10 +122,11 @@ def process_folder(dir, config:PostProcessingConfig):
                 #####################################
                 
                 
-        except:
-            print(f"Database locked for db in path {dir}.")
-            conn.close()
-            raise
+        #except Exception as e:
+          #  print(e)
+          #  print(f"Database locked for db in path {dir}.")
+           # conn.close()
+           # raise
         ### postprocessing
         
     for key, details in config.csvs.items():

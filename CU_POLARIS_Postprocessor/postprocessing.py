@@ -123,12 +123,13 @@ def process_solo_equiv_fare(iter_dir, demand_db, supply_db, result_db, folder,fo
                                 left join person b on a.person = b.person 
                                 left join household c on b.household = c.household 
                                 left join location d on c.location = d.location
+                                where a.service_type <> 99
                                 ;"""
             do_skim = True
             conn.cursor().executescript(f"""attach '{supply_db}' as a;""")
             conn.cursor().executescript(f"""attach '{result_db}' as b;""")
             req_df = pd.read_sql(request_sql, conn).assign(folder=folder)
-            fleet_size = pd.read_sql("""select (SELECT count(*) as fleet_size FROM TNC_Statistics) as fleet_size, (select count(*) from tnc_request) as requests;""",conn) * trip_multiplier
+            fleet_size = pd.read_sql("""select (SELECT count(*) as fleet_size FROM TNC_Statistics) as fleet_size, (select count(*) from tnc_request where service_type <> 99) as requests;""",conn) * trip_multiplier
         
     if not do_skim and not force_skims:
         t_case_df = pd.read_csv(dir.as_posix() + '/'+'requests_sum_helper.csv')
@@ -238,7 +239,7 @@ def process_elder_request_agg(iter_dir, trip_multiplier, supply_db, result_db, d
             with sqlite3.connect(demand_db) as conn:
                 conn.cursor().executescript(f"""attach '{supply_db}' as a;""")
                 conn.cursor().executescript(f"""attach '{result_db}' as b;""")
-                fleet_size = pd.read_sql("""select (SELECT count(*) as fleet_size FROM TNC_Statistics) as fleet_size, (select count(*) from tnc_request) as requests;""",conn) * trip_multiplier
+                fleet_size = pd.read_sql("""select (SELECT count(*) as fleet_size FROM TNC_Statistics) as fleet_size, (select count(*) from tnc_request where service_type <> 99) as requests;""",conn) * trip_multiplier
             
             req_df= pd.read_csv(dir.as_posix() + '/'+'requests.csv')
             groupings = ['zone', 'vehicles', 'disability', 'race', 'marital_status', 'income', 'age_class']
@@ -339,8 +340,8 @@ def process_demo_financial_case_data(iter_dir, demand_db, result_db,folder, requ
 
     with sqlite3.connect(result_db) as conn:
         conn.cursor().executescript(f"""attach database '{demand_db}' as a;""");
-        requests = pd.read_sql("""select (SELECT count(*) as fleet_size FROM TNC_Statistics) as fleet_size, (select count(*) from tnc_request) as requests;""",conn) * trip_multiplier
-        rev_vht_vmt = pd.read_sql(f"""select sum(end-start)/60 as revenue_minutes_traveled, sum(travel_distance)/1609.34 as revenue_miles_traveled from tnc_trip where passengers >0""",conn)*trip_multiplier
+        requests = pd.read_sql("""select (SELECT count(*) as fleet_size FROM TNC_Statistics) as fleet_size, (select count(*) from tnc_request where service_type <> 99) as requests;""",conn) * trip_multiplier
+        rev_vht_vmt = pd.read_sql(f"""select sum(end-start)/60 as revenue_minutes_traveled, sum(travel_distance)/1609.34 as revenue_miles_traveled from tnc_trip a left join tnc_request b on a.request = b.tnc_request_id  where case when b.service_type = 99 then 0 else a.passengers end >0""",conn)*trip_multiplier
         
     fleet_size = get_fleet_size(iter_dir, config)
 
@@ -401,13 +402,15 @@ def process_tnc_repositioning_success_rate(iter_dir, demand_db, supply_db, resul
                 a.start,
                 cast (a.start/3600 as int) as hour,
                 cast (a.start/{repo_interval} as int) as repositioning_period,
-                a.init_status
+                a.init_status,
+                d.service_type as service_type
                 from 
                 tnc_trip a 
                 left join location b 
                 on a.origin = b.location 
                 left join location c
-                on a.destination = c.location;"""
+                on a.destination = c.location
+                left join tnc_request d on a.request = d.tnc_request_id;"""
     
     with sqlite3.connect(demand_db) as conn:
         conn.cursor().executescript(f"""attach database '{supply_db}' as a;""");
@@ -417,8 +420,8 @@ def process_tnc_repositioning_success_rate(iter_dir, demand_db, supply_db, resul
     trips_df = trips_df.sort_values(by=["vehicle", "start"])
 
     # Separate repositioning and service trips
-    repositioning = trips_df[trips_df["init_status"] == -3].copy()
-    service_trips = trips_df[trips_df["init_status"] != -3].copy()
+    repositioning = trips_df[(trips_df["service_type"] == 99) & (trips_df["init_status"] == -2)].copy()
+    service_trips = trips_df[trips_df["service_type"] != 99].copy()
 
     #if repositioning is empty, return an empty DataFrame
     if repositioning.empty:
@@ -441,7 +444,7 @@ def process_tnc_repositioning_success_rate(iter_dir, demand_db, supply_db, resul
             future_trips = service_trips[
                 (service_trips["vehicle"] == vehicle_id) &
                 (service_trips["start"] > rep_end_time) &
-                (service_trips["start"] <= rep_end_time + 3600)
+                (service_trips["start"] <= rep_end_time + repo_interval)
             ].sort_values(by="start")
 
             total_count += 1

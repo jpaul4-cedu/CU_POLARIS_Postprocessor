@@ -101,16 +101,16 @@ def __main__():
         }
 
 
-    config_wtp=PostProcessingConfig(base_dir=Path(r"/scratch/jpaul4/repositioning/rl_repo_data/for_anal/"),
+    config_wtp=PostProcessingConfig(base_dir=Path(r"/scratch/jpaul4/repositioning/rl_repo_data/for_offload_convergence/"),
                                     output_h5=True,
                                     fresh_start=False,
                                     reset_csvs=False,
                                     reset_sql=False,
                                     reset_stops=False, 
-                                    db_names=['greenville','austin'],
-                                    scenario_file_names=['scenario_abm_jar.json','scenario_abm_default_repo.json','scenario_abm_no_repo.json','scenario_abm.json'],
+                                    db_names=['greenville','Austin'],
+                                    scenario_file_names=['scenario_abm.json','scenario_abm.modified.json'],
                                     fleet_model_file_names=['TNCFleetModel_joint_proactive_repo.json','TNCFleetModel_proactive_default_repo.json','TNCFleetModel_proactive_no_repo.json'],
-                                    parallel=False,
+                                    parallel=True,
                                     ignore_folders=["run","log"],
                                     analysis_folder="analysis_output",
                                     desired_outputs=desired_outputs

@@ -14,7 +14,7 @@ checks =[("config/TNCFleetModel_proactive_default_repo.json",["Operator_1","Flee
 
 
 new_case_path=r'/scratch/jpaul4/repositioning/rl_repo_data/comparisons/atx'
-folder_paths = [Path("/scratch/jpaul4/repositioning/rl_repo_data/rate_testing/atx")]
+folder_paths = [Path("/scratch/jpaul4/repositioning/rl_repo_data/convergence")]
 
 
 

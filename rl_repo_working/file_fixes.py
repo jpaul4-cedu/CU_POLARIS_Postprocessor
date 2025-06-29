@@ -11,7 +11,18 @@ def delete_runs ():
     items2 = []
     parallel = True
     moves = {}
-    new_case_path = r"/scratch/jpaul4/repositioning/rl_repo_data/comparisons/atx/"
+    new_case_path = r"/home/jpaul4/new_container/polaris_container_dev"
+
+    thread_tasks = {}
+        
+    do
+    for folder, sub_dirs, files in os.walk(new_case_path):
+        if len(sub_dirs) > 0:
+            for file in files:
+                items2.append(os.path.join(folder,file))
+
+    
+    
     if os.path.isdir(new_case_path):
         all_exist = True
         for fold in os.listdir(new_case_path):
