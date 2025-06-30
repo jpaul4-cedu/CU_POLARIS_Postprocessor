@@ -210,8 +210,8 @@ def get_sql_create(supply_db=None,trip_multiplier=None,result_db=None,config:Pos
         "tnc_results_discount":f"""
         CREATE TABLE if not exists tnc_results_discount AS
         SELECT 
-        (select cast(count(case when pooled = 0 then 1 end) as float) / cast(count(*) as float) from (select request, case when (max_pass - party_size) > 0 then 1 else 0 end as pooled from (select a.request, max(a.passengers) as max_pass, b.party_size from tnc_trip a left join tnc_request b  on a.request = b.TNC_request_id where b. service_type <> 99 group by a.request)))  as solo_perc,
-        (select cast(count(case when pooled = 1 then 1 end) as float) / cast(count(*) as float) from (select request, case when (max_pass - party_size) > 0 then 1 else 0 end as pooled from (select a.request, max(a.passengers) as max_pass, b.party_size from tnc_trip a left join tnc_request b  on a.request = b.TNC_request_id where b.service_type <> 99 group by a.request))) as pooled_perc,
+        (select sum(1-pooled_service)*1.0/(count(*)*1.0) from tnc_request where service_type <> 99)  as solo_perc,
+        (select sum(pooled_service)*1.0/(count(*)*1.0) from tnc_request where service_type <> 99) as pooled_perc,
         (SELECT SUM(fare) *{trip_multiplier} FROM tnc_request) as fare,
         (SELECT AVG(case when b.service_type = 99 then 0 else a.passengers end) FROM tnc_trip a left join tnc_request b  on a.request = b.TNC_request_id) as AVO,
         (SELECT AVG(CASE WHEN a.passengers > 0 THEN a.passengers END) FROM tnc_trip a left join tnc_request b  on a.request = b.TNC_request_id where b.service_type <> 99) as rAVO,

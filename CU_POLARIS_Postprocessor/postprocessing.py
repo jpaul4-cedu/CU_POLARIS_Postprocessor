@@ -14,68 +14,70 @@ def process_nearest_stops(iter_dir,supply_db,demand_db, folder, config:PostProce
     dir=iter_dir
     
     if os.path.exists(dir.as_posix() + '/closest_stops_helper.csv'):
-        results_df_sum.to_csv(dir.as_posix() + '/closest_stops_helper.csv', index=False)
-    else:
-        from sklearn.neighbors import BallTree
-        from joblib import Parallel, delayed
-        print(f"Starting stop processing for {dir}.")
-        read_house_sql ="""SELECT b.household, c.x, c.y, b.workers, b.vehicles,
-        COUNT(CASE WHEN a.age > 60 THEN 1 END) AS people_over_60,
-        COUNT(CASE WHEN a.age <= 60 THEN 1 END) AS people_under_60,
-        sum(a.income) as income, c.zone
-        FROM person a
-        LEFT JOIN household b ON a.household = b.household
-        LEFT JOIN location c ON b.location = c.location
-        GROUP BY b.household, c.x, c.y, c.zone;"""
+        results_df_sum = pd.read_csv(dir.as_posix() + '/closest_stops_helper.csv')
+        if len(results_df_sum) > 1:
+            return results_df_sum
         
-
-        
-        read_bus_sql = """select * from transit_stops;"""
-        supply_path = f"""attach database "{supply_db}" as a;"""
-        with sqlite3.connect(demand_db) as conn:
-            conn.cursor().executescript(supply_path);
-            # Load households and bus stops data into DataFrames
-            households_df = pd.read_sql_query(read_house_sql, conn)
-            bus_stops_df = pd.read_sql_query(read_bus_sql, conn)
-        bus_stops_coords = bus_stops_df[['X','Y']].values
-        households_coords = households_df[['x','y']].values
-        tree = BallTree(bus_stops_coords, leaf_size=40)
-
-        batch_size = 1000
-        n_jobs = -1  # Use all available CPU cores
-
-        # Create list of tasks
-        tasks = [(start, min(start + batch_size, len(households_coords))) for start in range(0, len(households_coords), batch_size)]
-
-        # Print tasks for debugging
-        #print("Tasks:", tasks)
+    from sklearn.neighbors import BallTree
+    from joblib import Parallel, delayed
+    print(f"Starting stop processing for {dir}.")
+    read_house_sql ="""SELECT b.household, c.x, c.y, b.workers, b.vehicles,
+    COUNT(CASE WHEN a.age > 60 THEN 1 END) AS people_over_60,
+    COUNT(CASE WHEN a.age <= 60 THEN 1 END) AS people_under_60,
+    sum(a.income) as income, c.zone
+    FROM person a
+    LEFT JOIN household b ON a.household = b.household
+    LEFT JOIN location c ON b.location = c.location
+    GROUP BY b.household, c.x, c.y, c.zone;"""
     
-        p_process_batch_nearest_stops = partial(process_batch_nearest_stops,households_coords=households_coords, tree=tree, households_df=households_df, bus_stops_df=bus_stops_df)
 
-        # Process tasks in parallel
-        results = Parallel(n_jobs=n_jobs)(delayed(p_process_batch_nearest_stops)(start, end) for start, end in tasks)
     
-        # Flatten the list of results
-        flat_results = [item for sublist in results for item in sublist]
+    read_bus_sql = """select * from transit_stops;"""
+    supply_path = f"""attach database "{supply_db}" as a;"""
+    with sqlite3.connect(demand_db) as conn:
+        conn.cursor().executescript(supply_path);
+        # Load households and bus stops data into DataFrames
+        households_df = pd.read_sql_query(read_house_sql, conn)
+        bus_stops_df = pd.read_sql_query(read_bus_sql, conn)
+    bus_stops_coords = bus_stops_df[['X','Y']].values
+    households_coords = households_df[['x','y']].values
+    tree = BallTree(bus_stops_coords, leaf_size=40)
 
-        # Convert results to a DataFrame
-        results_df = pd.DataFrame(flat_results)
-        results_df['miles']=results_df['distance_to_nearest_bus_stop']/1609.34
-        
+    batch_size = 1000
+    n_jobs = -1  # Use all available CPU cores
 
-        walking_speed = 2.1 #mph https://www.medicalnewstoday.com/articles/average-walking-speed#average-speed-by-age
-        walk_lim = 8 #mins
+    # Create list of tasks
+    tasks = [(start, min(start + batch_size, len(households_coords))) for start in range(0, len(households_coords), batch_size)]
+
+    # Print tasks for debugging
+    #print("Tasks:", tasks)
+
+    p_process_batch_nearest_stops = partial(process_batch_nearest_stops,households_coords=households_coords, tree=tree, households_df=households_df, bus_stops_df=bus_stops_df)
+
+    # Process tasks in parallel
+    results = Parallel(n_jobs=n_jobs)(delayed(p_process_batch_nearest_stops)(start, end) for start, end in tasks)
+
+    # Flatten the list of results
+    flat_results = [item for sublist in results for item in sublist]
+
+    # Convert results to a DataFrame
+    results_df = pd.DataFrame(flat_results)
+    results_df['miles']=results_df['distance_to_nearest_bus_stop']/1609.34
+    
+
+    walking_speed = 2.1 #mph https://www.medicalnewstoday.com/articles/average-walking-speed#average-speed-by-age
+    walk_lim = 8 #mins
 
 
-        results_df['minutes walking']=results_df['miles']/walking_speed*60
-        results_df['walkable']=results_df['minutes walking'].apply(lambda x: 0 if x > walk_lim else 1)
-    # print(results_df.head(10))
-        results_df_sum = results_df.groupby(['walkable', 'vehicles', 'over_60', 'under_60','zone']).agg(count=('income', 'size'),total_income=('income', 'sum')).reset_index()
+    results_df['minutes walking']=results_df['miles']/walking_speed*60
+    results_df['walkable']=results_df['minutes walking'].apply(lambda x: 0 if x > walk_lim else 1)
+# print(results_df.head(10))
+    results_df_sum = results_df.groupby(['walkable', 'vehicles', 'over_60', 'under_60','zone']).agg(count=('income', 'size'),total_income=('income', 'sum')).reset_index()
 
-        dir_name = os.path.split(os.path.split(dir.absolute())[0])[1]
-        results_df_sum=results_df_sum.assign(folder=folder)
-        results_df_sum.to_csv(dir.as_posix() + '/closest_stops_helper.csv', index=False)
-        print(f'Finished stop processing for {dir}.')
+    dir_name = os.path.split(os.path.split(dir.absolute())[0])[1]
+    results_df_sum=results_df_sum.assign(folder=folder)
+    results_df_sum.to_csv(dir.as_posix() + '/closest_stops_helper.csv', index=False)
+    print(f'Finished stop processing for {dir}.')
     return results_df_sum
 
 def process_batch_nearest_stops(start_idx, end_idx, households_coords, tree, households_df, bus_stops_df, **kwargs):
@@ -104,6 +106,8 @@ def process_solo_equiv_fare(iter_dir, demand_db, supply_db, result_db, folder,fo
     
     with sqlite3.connect(demand_db) as conn:
         if os.path.exists(dir.as_posix() + '/'+'requests_sum_helper.csv') and not force_skims:
+            t_case_df = pd.read_csv(dir.as_posix() + '/'+'requests_sum_helper.csv')
+            return t_case_df
             do_skim = False
         else:
             request_sql = f"""select a.tnc_request_id as request,
@@ -391,42 +395,139 @@ def process_demo_financial_case_data(iter_dir, demand_db, result_db,folder, requ
 
 def process_tnc_repositioning_success_rate(iter_dir, demand_db, supply_db, result_db, folder, trip_multiplier, config, **kwargs):
     #get the trips df
-    if os.path.exists(iter_dir.as_posix()+"/repositioning_success.csv"):
-        return pd.read_csv(iter_dir.as_posix()+"/repositioning_success.csv")
+        #get the trips df
+    repo_interval = 900
+    csv_path = os.path.join(iter_dir, f"{folder}_tnc_repositioning_success_rate.csv")
+    if os.path.exists(csv_path) and not (config.reset_csvs):
+        return pd.read_csv(csv_path)
 
-    repo_interval = get_repositioning_interval(iter_dir, config)
-    query = f"""select 
-                a.vehicle, 
-                b.zone as origin_zone, 
-                c.zone as destination_zone,
-                a.start,
-                cast (a.start/3600 as int) as hour,
-                cast (a.start/{repo_interval} as int) as repositioning_period,
-                a.init_status,
-                d.service_type as service_type
-                from 
-                tnc_trip a 
-                left join location b 
-                on a.origin = b.location 
-                left join location c
-                on a.destination = c.location
-                left join tnc_request d on a.request = d.tnc_request_id;"""
-    
+    trip_query = f"""select 
+                    a.vehicle, 
+                    a.start,
+                    a.end,
+                    b.origin_zone,
+                    b.destination_zone,
+                    a.init_status,
+                    a.passengers,
+                    a.skim_travel_time/60 as skim_travel_time,
+                    a.routed_travel_time/60 as routed_travel_time,
+                    a.request,
+                    a.travel_distance/1609.34 as travel_distance,  -- Convert meters to miles
+                    cast (a.start/3600 as int) as hour,
+                    cast (a.start/{repo_interval} as int) as repositioning_period,
+                    a.init_status,
+                    b.service_type as service_type,
+                    a.tour
+                    from 
+                    tnc_trip a 
+                    left join tnc_request b on a.request = b.tnc_request_id;"""
+
+    request_query = f"""select *
+                        from (
+                        (select sum(1-pooled_service)*1.0/(count(*)*1.0) as solo_perc from tnc_request where service_type <> 99)  as solo_perc,
+                        (select sum(pooled_service)*1.0/(count(*)*1.0) as pooled_perc from tnc_request where service_type <> 99) as pooled_perc,
+                        (SELECT SUM(fare) * {trip_multiplier} as total_fare FROM tnc_request) as total_fare,
+                        (SELECT SUM(fare)/(count(*) * 1.0) as average_fare FROM tnc_request where service_type <> 99) as average_fare,
+                        (SELECT SUM(discount) * {trip_multiplier} as total_discount FROM tnc_request) as total_discount,
+                        (SELECT SUM(discount)/(count(*) * 1.0) as average_discount FROM tnc_request where service_type <> 99) as average_discount,
+                        (SELECT count(*) * {trip_multiplier} as requests FROM tnc_request where service_type <> 99) as requests,
+                        (SELECT count(*) * {trip_multiplier} as repo_requests FROM tnc_request where service_type = 99 and assigned_vehicle is not null) as repo_requests,
+                        (SELECT count(*) * {trip_multiplier} as pooled_requests FROM tnc_request where service_type <> 99 and pooled_service = 1 and assigned_vehicle is not null) as pooled_requests,
+                        (SELECT count(*) * {trip_multiplier} as solo_requests FROM tnc_request where service_type <> 99 and pooled_service = 0 and assigned_vehicle is not null) as solo_requests,
+                        (SELECT count(*) * {trip_multiplier} as rejected_requests FROM tnc_request where service_type <> 99 and assigned_vehicle is null) as rejected_requests,
+                        (SELECT avg(pickup_time - request_time)/60 as average_wait_time_min FROM tnc_request where service_type <> 99) as average_wait_time_min,
+                        (SELECT CAST(count(case when assigned_vehicle is null then 1 end) AS FLOAT) / CAST(count(*) AS FLOAT) as rejection_rate FROM tnc_request where service_type <> 99) AS rejection_rate,
+                        (SELECT sum(discount)/sum(fare) as average_discount_rate FROM tnc_request) as average_discount_rate,
+                        (SELECT sum(dropoff_time - pickup_time)/60 /(count(*)*1.0) as average_person_ttime_min FROM tnc_request where service_type <> 99) as average_person_ttime_min,
+                        (SELECT sum(dropoff_time - pickup_time)/60 /(count(*)*1.0) as average_repo_ttime_min FROM tnc_request where service_type = 99) as average_repo_ttime_min,
+                        (SELECT sum(((dropoff_time - pickup_time) - estimated_od_travel_time)/60)/(count(*) * 1.0) as average_pooled_delay_time_min FROM tnc_request where service_type <> 99 and pooled_service = 1) as average_pooled_delay_time_min,
+                        (SELECT sum(((dropoff_time - pickup_time) - estimated_od_travel_time)/60)/(count(*) * 1.0) as average_solo_delay_time_min FROM tnc_request where service_type <> 99 and pooled_service = 0) as average_solo_delay_time_min);"""
+
+
+
+    def split_on_zero_pax(group):
+        # We assume the first row is deadheading with 0 passengers — keep in same sub-tour
+        sub_tour = []
+        sub_tour_id = 0
+        for i, row in enumerate(group.itertuples()):
+            # If passengers == 0 and not first segment, increment sub-tour ID
+            if i != 0 and row.passengers == 0:
+                sub_tour_id += 1
+            sub_tour.append(sub_tour_id)
+        group['sub_tour'] = sub_tour
+        return group
+
+
+
+
+
+
+
     with sqlite3.connect(demand_db) as conn:
         conn.cursor().executescript(f"""attach database '{supply_db}' as a;""");
-        trips_df = pd.read_sql(query, conn)
+        trips_df = pd.read_sql(trip_query, conn)
+        requests_df = pd.read_sql(request_query, conn)
+
+    #correcting tours
+    trips_df = trips_df.sort_values(['vehicle', 'tour', 'start']).reset_index(drop=True)
+    trips_df = trips_df.groupby(['vehicle', 'tour'], group_keys=False).apply(split_on_zero_pax)
+
+    # Optional: Create a final unique tour ID
+    trips_df['final_tour_id'] = (trips_df['vehicle'].astype(str) + '_tour_' + trips_df['tour'].astype(str) + '_sub_' + trips_df['sub_tour'].astype(str))
+
+    
+    #aggregate to tours
+    tour_df = trips_df.groupby(['vehicle', 'tour', 'sub_tour'], as_index=False).agg({
+        'start': 'min',
+        'end': 'max',
+        'passengers': 'max',
+        'skim_travel_time': 'sum',
+        'routed_travel_time': 'sum',
+        'request': lambda x: list(x),
+        'service_type': 'first',
+        'hour': 'first',
+        'origin_zone': 'first',
+        'destination_zone': 'last',
+        'travel_distance': 'sum',
+        'init_status':'first'
+    }).copy()
+
+    tour_df = tour_df.rename(columns={
+        'start': 'tour_start',
+        'end': 'tour_end',
+        'skim_travel_time': 'total_skim_travel_time',
+        'routed_travel_time': 'total_routed_travel_time',
+        'request': 'requests',
+        'passengers': 'max_passengers',
+        'travel_distance': 'total_travel_distance'
+    })
+
+    tour_df["requests_served"] = tour_df["requests"].apply(lambda x: len(x) if isinstance(x, list) else 0)
+    tour_df["pooled_tour"] = tour_df["requests_served"] > 1
+
 
     # Ensure trips are sorted
     trips_df = trips_df.sort_values(by=["vehicle", "start"])
 
-    # Separate repositioning and service trips
-    repositioning = trips_df[(trips_df["service_type"] == 99) & (trips_df["init_status"] == -2)].copy()
-    service_trips = trips_df[trips_df["service_type"] != 99].copy()
+    # Separate repositioning and service tours
+    if (trips_df["service_type"] == 99).any():
+        repositioning = trips_df[(trips_df["service_type"] == 99) & (trips_df["init_status"] == -2)].copy()
+        service_trips = trips_df[trips_df["service_type"] != 99].copy()
+    else:
+        repositioning = trips_df[(trips_df["init_status"] == -3)].copy()
+        service_trips = trips_df[trips_df["init_status"] != -3].copy()
 
-    #if repositioning is empty, return an empty DataFrame
+
+    #if there are no repositioning trips, output a dummy dataframe with 0 in each hour row with the same columns as repositioning
     if repositioning.empty:
-        return pd.DataFrame(columns=["hour", "num_repositioned", "num_successful", "success_rate"])
-    
+        hour_range = pd.date_range(start=trips_df["start"].min().floor("H"), end=trips_df["end"].max().ceil("H"), freq="H")
+        results = pd.DataFrame({
+            "hour": hour_range,
+            "num_repositioned": 0,
+            "num_successful": 0,
+            "success_rate": 0
+        })
+
     hour_grouped = repositioning.groupby("hour")
 
     results = []
@@ -444,7 +545,7 @@ def process_tnc_repositioning_success_rate(iter_dir, demand_db, supply_db, resul
             future_trips = service_trips[
                 (service_trips["vehicle"] == vehicle_id) &
                 (service_trips["start"] > rep_end_time) &
-                (service_trips["start"] <= rep_end_time + repo_interval)
+                (service_trips["start"] <= rep_end_time + 3600)  # Adjusted to use repositioning interval
             ].sort_values(by="start")
 
             total_count += 1
@@ -463,12 +564,68 @@ def process_tnc_repositioning_success_rate(iter_dir, demand_db, supply_db, resul
 
     # Create a summary dataframe
     summary_df = pd.DataFrame(results)
-    summary_df['folder'] = folder
+    summary_df["folder"] = folder
     summary_df.sort_values(by="hour").reset_index(drop=True)
-    summary_df.to_csv(iter_dir.as_posix()+"/repositioning_success.csv",index=False)
 
-    # Optional: sort by hour
-    return summary_df
+    #agg into daily summary
+    daily_summary_df = summary_df.groupby(["folder"]).agg({
+        "num_repositioned": "sum",
+        "num_successful": "sum"
+    }).reset_index()
+    #allow for zero division
+    daily_summary_df["success_rate"] = daily_summary_df["num_successful"] / daily_summary_df["num_repositioned"].replace(0, np.nan)  # Avoid division by zero
+    daily_summary_df = daily_summary_df.fillna(0)  # Replace NaN with
+    #add columns for average routed travel time, average travel distance, average skim travel time, total routed travel time, average skim travel time and travel distance, empty vehicle travel time and distance total (passengers = 0) 
     
+    if (trips_df["service_type"] == 99).any():
+        daily_summary_df["average_routed_ttime_repo"] = tour_df[tour_df["service_type"] == 99]["total_routed_travel_time"].mean()
+        daily_summary_df["average_skim_ttime_repo"] = tour_df[tour_df["service_type"] == 99]["total_skim_travel_time"].mean()
+        daily_summary_df["average_travel_distance_repo"] = tour_df[tour_df["service_type"] == 99]["total_travel_distance"].mean()
+    else:
+        daily_summary_df["average_routed_ttime_repo"] = tour_df[tour_df["init_status"] == -3]["total_routed_travel_time"].mean()
+        daily_summary_df["average_skim_ttime_repo"] = tour_df[tour_df["init_status"] == -3]["total_skim_travel_time"].mean()
+        daily_summary_df["average_travel_distance_repo"] = tour_df[tour_df["init_status"] == -3]["total_travel_distance"].mean()
+
+    daily_summary_df["average_routed_ttime_pooled"] = tour_df[tour_df["pooled_tour"] == True]["total_routed_travel_time"].mean()
+    daily_summary_df["average_skim_ttime_pooled"] = tour_df[tour_df["pooled_tour"] == True]["total_skim_travel_time"].mean()
+    daily_summary_df["average_travel_distance_pooled"] = tour_df[tour_df["pooled_tour"] == True]["total_travel_distance"].mean()
+
+
+    if (trips_df["service_type"] == 99).any():
+        daily_summary_df['average_routed_ttime_solo'] = tour_df[(tour_df["pooled_tour"] == False) & (tour_df["service_type"] != 99)]["total_routed_travel_time"].mean()
+        daily_summary_df['average_skim_ttime_solo'] = tour_df[(tour_df["pooled_tour"] == False) & (tour_df["service_type"] != 99)]["total_skim_travel_time"].mean()
+        daily_summary_df['average_travel_distance_solo'] = tour_df[(tour_df["pooled_tour"] == False) & (tour_df["service_type"] != 99)]["total_travel_distance"].mean()
+    else:
+        daily_summary_df['average_routed_ttime_solo'] = tour_df[(tour_df["pooled_tour"] == False) & (tour_df["init_status"] != -3)]["total_routed_travel_time"].mean()
+        daily_summary_df['average_skim_ttime_solo'] = tour_df[(tour_df["pooled_tour"] == False) & (tour_df["init_status"] != -3)]["total_skim_travel_time"].mean()
+        daily_summary_df['average_travel_distance_solo'] = tour_df[(tour_df["pooled_tour"] == False) & (tour_df["init_status"] != -3)]["total_travel_distance"].mean()
+
+
+    daily_summary_df["total_travel_time"] = tour_df["total_routed_travel_time"].sum()
+    daily_summary_df["total_travel_distance"] = tour_df["total_travel_distance"].sum()
+    daily_summary_df["total_empty_vehicle_travel_distance"] = tour_df[tour_df["max_passengers"] == 0]["total_travel_distance"].sum()
+    daily_summary_df["pooled_tour_count"] = tour_df[tour_df["pooled_tour"] == True].shape[0]
+
+    #avo = sum(passengers * mileage) over sum mileage
+    daily_summary_df["average_vehicle_occupancy"] = (trips_df["passengers"] * trips_df["travel_distance"]).sum() / trips_df["travel_distance"].sum()
+    #ravo = sum(passengers * mileage) over sum mileage where only trips with at lease one passenger are considered
+    daily_summary_df["average_revenue_vehicle_occupancy"] = (trips_df[trips_df["passengers"] > 0]["passengers"] * trips_df[trips_df["passengers"] > 0]["travel_distance"]).sum() / trips_df[trips_df["passengers"] > 0]["travel_distance"].sum()
+
+    #average pickup segment length      
+    if (trips_df["service_type"] == 99).any():
+        daily_summary_df["average_pickup_segment_distance"] = trips_df[(trips_df["passengers"] < 1) & (trips_df["service_type"] != 99)]["travel_distance"].mean()
+    else:
+        daily_summary_df["average_pickup_segment_distance"] = trips_df[(trips_df["passengers"] < 1) & (tour_df["init_status"] != -3)]["travel_distance"].mean()
+
+
+    requests_df["folder"] = folder
+    #join requests_df with daily_summary_df
+    daily_summary_df = daily_summary_df.join(requests_df.set_index("folder"), on="folder", how="left")
+
+
+    daily_summary_df.to_csv(csv_path, index=False)
+   
+    # Optional: sort by hour
+    return daily_summary_df
     
     

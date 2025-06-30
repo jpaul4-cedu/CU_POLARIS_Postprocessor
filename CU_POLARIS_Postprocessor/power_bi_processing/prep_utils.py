@@ -55,9 +55,14 @@ def process_folder_names_rl_repo(config:PostProcessingConfig):
         #Check if folder_2_2 contains letters or a number by row
         #for rows where folder_2_2 contains letters, set the strategy to those letter codes
         #for rows where folder_2_2 contains a number, set the strategy to 'jar'
-        df['Strategy'] = df['folder_2_3'].apply(lambda x: x if x.isalpha() else 'jar')
-        df['Repo_Weight'] = df['folder_2_3'].apply(lambda x: x if x.isnumeric() else 'N/A')
-        df = df.rename(columns={'folder_1': 'City', 'folder_2_1': 'Fleet Size', 'folder_2_4': 'Iteration'})
+        #df['Strategy'] = df['folder_2_3'].apply(lambda x: x if x.isalpha() else 'jar')
+        df['Repo_Weight']=pd.to_numeric(df['folder_2_3'],errors ='coerce')
+        df['Strategy'] = df['folder_2_3'].where(df['Repo_Weight'].isna())
+        df['Strategy'] = df['Strategy'].fillna('jar')
+        df['Repo_Weight']=df['Repo_Weight'].fillna('0')
+       # df['Repo_Weight'] = df['folder_2_3'].apply(lambda x: x if x.isnumeric() else 'N/A')
+        df = df.rename(columns={'folder_1': 'City', 'folder_2_1': 'Fleet Size', 'folder_2_4': 'Iteration',"Strategy":"Strat_Raw"})
+        df["Strategy"]=df["Strat_Raw"] + "_" + df["Repo_Weight"].astype(str)
         # Drop unnecessary columns
         df.drop(columns=['folder_2_3','folder_2','folder_2_2'], inplace=True)
 

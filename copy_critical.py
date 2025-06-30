@@ -47,7 +47,8 @@ for fold in folders_to_create:
     else:
         os.makedirs(fold,exist_ok=False)
 
-for item in items1:
+items_to_remove = []
+for index, item in enumerate(items1):
     old = item[0]
     new = item[1]
     if os.path.isfile(old) and not os.path.isfile(new):
@@ -60,13 +61,16 @@ for item in items1:
             else:
                 raise FileNotFoundError(f"{old} not found.")
         if os.path.isfile(new):
-            skip = input(f"{new} already exists. Continue?[y,n]")
-            if skip == "y":
-                continue
-            else:
-                raise FileExistsError(f"{new} already exists.")
-        
+            items_to_remove.append(index)
 
+
+items_to_remove.sort(reverse =True)
+items_removed = 0
+for ind in items_to_remove:
+    del items1[ind]
+    items_removed = items_removed+1
+
+print(f"{items_removed} items will be skipped because they are already present in the output.")
 
 parallel = True
 moves[type1] = items1

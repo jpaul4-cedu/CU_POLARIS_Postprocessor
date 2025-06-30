@@ -14,13 +14,17 @@ def clean_analysis(config:PostProcessingConfig):
     '''Clean analysis loops through all of the case folders 
     in an output dataset and removes the desired existing analysis CSVs, 
     SQL Tables, and any other supporting files to provide a fresh start for analysis.'''
-    run_dirs = [Path(d) for d in glob.glob(config.base_dir.as_posix() + "/*/")]
-    for dir in run_dirs:
-        dir = get_highest_iteration_folder(dir)
-        
+    
+    for dir in config.folder_db_map.keys():
+        db_paths = config.folder_db_map[dir]
+        supply_db = db_paths["supply"]
+        demand_db = db_paths["demand"]
+        result_db = db_paths['result']
+        trip_multiplier = db_paths["trip_multiplier"]
+
         print(f"Cleaning: {dir}")
         for name in config.db_names:
-            path = Path(dir.as_posix() + '/' + name+'-Supply.sqlite')
+            path = Path(supply_db)
             if os.path.exists(path):
                 if os.path.getsize(path) > 0:
                     db_name = name
@@ -32,7 +36,7 @@ def clean_analysis(config:PostProcessingConfig):
                     root.destroy()
                     if response:
                         os.remove(path)
-                        demand_path = Path(dir.as_posix() + '/' + name+'-Demand.sqlite')
+                        demand_path = Path(demand_db)
                         if os.path.exists(demand_path):
                             if os.path.getsize(demand_path) < 1024:
                                 os.remove(demand_path)
@@ -44,28 +48,6 @@ def clean_analysis(config:PostProcessingConfig):
 
 
                 break
-        
-        os.chdir(dir)
-        demand_db = db_name + "-Demand.sqlite"
-        #result_db = f"{db_name}-Result.sqlite"
-        result_db = db_name + "-Result.sqlite"
-        supply_db = db_name + "-Supply.sqlite"
-        
-        
-        if not os.path.exists(demand_db):
-            cmd = f" tar xf {demand_db}.tar.gz"
-            subprocess.check_output(cmd, shell=True, encoding="utf-8")
-
-        if not os.path.exists(result_db):
-            cmd = f" tar xf {result_db}.tar.gz"
-            subprocess.check_output(cmd, shell=True, encoding="utf-8")
-    
-        if not os.path.exists(supply_db):
-            if not os.path.exists(dir.parent.as_posix() + '/' + supply_db):
-                cmd = f" tar xf {supply_db}.tar.gz"
-                subprocess.check_output(cmd, shell=True, encoding="utf-8")
-            else:
-                shutil.copyfile(dir.parent.as_posix() + '/' + supply_db, supply_db)
         
         
         if config.reset_sql:   
@@ -87,4 +69,4 @@ def clean_analysis(config:PostProcessingConfig):
             else:
                 print(f"The file {csv} does not exist.")
 
-    os.chdir(dir)
+    

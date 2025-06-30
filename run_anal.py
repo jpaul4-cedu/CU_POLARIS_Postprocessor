@@ -66,8 +66,10 @@ def run_pbix(config_wtp:PostProcessingConfig):
     }
     study_name = 'rl_repo'
     #generates a new h5 file called pbix_tables.h5 which are directly used to generate charts in power bi
-    pbix_charting.run_all(work_path,pbix_aggregators,db_name_folder_map,study_name,db_path=({"greenville":r"C:\polaris\data\tests_local\base_models\gsc_300\greenville-Supply.sqlite","campo":r"C:\polaris\data\base_models_new_polaris\atx_27500\Austin-Supply.sqlite"}))
-    pbix_charting.open_pbix_file(config_wtp.base_dir,study_name)
+    pbix_charting.run_all(work_path,pbix_aggregators,db_name_folder_map,study_name,
+    db_path=({'campo':'/scratch/jpaul4/repositioning/rl_repo_data/base_models/atx_45000/Austin-Supply.sqlite',
+    'greenville':'/scratch/jpaul4/repositioning/rl_repo_data/base_models/gsc_300/greenville-Supply.sqlite'}))
+   # pbix_charting.open_pbix_file(config_wtp.base_dir,study_name)
 
 def __main__():
     desired_outputs = {
@@ -89,8 +91,8 @@ def __main__():
             'requests': 'postprocessing_helper',
             'requests_sum_helper':'postprocessing_helper',
             'requests_sum': 'postprocessing',
-            #'closest_stops_helper':'postprocessing_helper',
-            #'closest_stops':'postprocessing',
+            'closest_stops_helper':'postprocessing_helper',
+            'closest_stops':'postprocessing',
             'tnc_stat_summary_helper':'postprocessing_helper',
             'tnc_stat_summary':'postprocessing',
             'repositioning_success_rate':'postprocessing',
@@ -104,13 +106,13 @@ def __main__():
     config_wtp=PostProcessingConfig(base_dir=Path(r"/scratch/jpaul4/repositioning/rl_repo_data/for_offload_convergence/"),
                                     output_h5=True,
                                     fresh_start=False,
-                                    reset_csvs=False,
+                                    reset_csvs=True,
                                     reset_sql=False,
                                     reset_stops=False, 
                                     db_names=['greenville','Austin'],
                                     scenario_file_names=['scenario_abm.json','scenario_abm.modified.json'],
                                     fleet_model_file_names=['TNCFleetModel_joint_proactive_repo.json','TNCFleetModel_proactive_default_repo.json','TNCFleetModel_proactive_no_repo.json'],
-                                    parallel=True,
+                                    parallel=False,
                                     ignore_folders=["run","log"],
                                     analysis_folder="analysis_output",
                                     desired_outputs=desired_outputs

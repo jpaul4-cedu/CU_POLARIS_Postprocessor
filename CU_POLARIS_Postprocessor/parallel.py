@@ -100,17 +100,26 @@ def process_folder(dir, config:PostProcessingConfig):
                     print(f"No requests in {dir.as_posix()}.")
                     return {}
                 conn.cursor().executescript(index_script_demand)
-                conn.cursor().executescript(fix_trip_passengers)
-                conn.cursor().executescript(fix_request_party_size)
-                temp_df = pd.read_sql(f"select max(party_size) as max_party from tnc_request where service_type = 99;", conn)
-                max_party = temp_df.iat[0,0]
-                if max_party > 0:
-                    raise ValueError(f"Adjustment of request party size did not take for {dir}")
+                if not dir_name.endswith("dr") and not dir_name.endswith("nr"):
+                    temp_df = pd.read_sql(f"select max(party_size) as max_party from tnc_request where service_type = 99;", conn)
+                    max_party = temp_df.iat[0,0]
+                    if max_party > 0:
+                        conn.cursor().executescript(fix_request_party_size)
+                        temp_df = pd.read_sql(f"select max(party_size) as max_party from tnc_request where service_type = 99;", conn)
+                        max_party = temp_df.iat[0,0]
+                        if max_party > 0:
+                            raise ValueError(f"Adjustment of request party size did not take for {dir}")
 
-                temp_df = pd.read_sql(f"select max(passengers) as max_pass from tnc_trip a left join tnc_request b on a.request = b.tnc_request_id where b.service_type = 99;", conn)
-                max_pass = temp_df.iat[0,0]
-                if max_pass > 0:
-                    raise ValueError(f"Adjustment of trip passengers did not take for {dir}")
+
+                    temp_df = pd.read_sql(f"select max(passengers) as max_pass from tnc_trip a left join tnc_request b on a.request = b.tnc_request_id where b.service_type = 99;", conn)
+                    max_pass = temp_df.iat[0,0]
+                    if max_pass > 0:
+                        conn.cursor().executescript(fix_trip_passengers)
+                        temp_df = pd.read_sql(f"select max(passengers) as max_pass from tnc_trip a left join tnc_request b on a.request = b.tnc_request_id where b.service_type = 99;", conn)
+                        max_pass = temp_df.iat[0,0]
+                        if max_pass > 0:
+                            raise ValueError(f"Adjustment of trip passengers did not take for {dir}")
+                
                 temp_df = None
 
                 for query in queries_to_run:

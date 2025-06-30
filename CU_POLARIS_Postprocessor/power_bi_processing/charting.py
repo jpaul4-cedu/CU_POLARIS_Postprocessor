@@ -680,7 +680,9 @@ class mode_shift_queries():
 
 class demographic_queries():
     def __init__(self,path,aggregators,db_path, city_names):
+        self.mode_data_df = None
         self.run_demographic_queries(path,aggregators,db_path,city_names)
+        
 
     def load_tables(self,path):
         self.demographic_df = load_h5_table(path,'fare_sensitivity_demograpic_tnc_stats')
@@ -750,6 +752,8 @@ class demographic_queries():
         return grouped_rows
 
     def mode_data(self,aggregators):
+        if not self.mode_data_df is None:
+            return self.mode_data_df
         zone_data_df = self.zone_data(aggregators)
         filtered_rows = zone_data_df[(zone_data_df['age_class'] == 2) & (zone_data_df['mode'] != 'FAIL_REROUTE')].copy()
     
@@ -773,7 +777,8 @@ class demographic_queries():
         merged_data = merged_data.rename(columns={'HH_Inc_Quartile': 'HH_Inc_Quartile'})
         merged_data.drop(columns=['Fleet Size_y'], inplace=True)
         merged_data.rename(columns={'Fleet Size_x': 'Fleet Size'}, inplace=True)
-        return merged_data
+        self.mode_data_df = merged_data
+        return self.mode_data_df
 
     def hh_inc_map(self,aggregators):
         group_cols = [col for col in aggregators['Demographic Aggregators'] if col is not None] + ['zone']
@@ -1664,7 +1669,7 @@ def run_all(path,aggregators,city_names,study_name, db_path=None):
         tqdm.write("Searching for supply databases.")
         #db_path = find_db_path(path, city_names)
         if db_path is None:
-            db_path = {'campo':'C:\\Users\\jpaul4\\Box\\Research\\Papers\\6_TRB_2025_Papers\\redo cases\\trb_cases_results\\atx_30000_reg\\campo-Supply.sqlite','greenville':'C:\\Users\\jpaul4\\Box\\Research\\Papers\\6_TRB_2025_Papers\\redo cases\\trb_cases_results\\gsc_500_heur_reg\\greenville-Supply.sqlite'}
+            db_path = {'campo':'/scratch/jpaul4/repositioning/rl_repo_data/base_models/atx_45000/Austin-Supply.sqlite','greenville':'/scratch/jpaul4/repositioning/rl_repo_data/base_models/gsc_300/greenville-Supply.sqlite'}
         
         pbar.update(1)
         path=path.as_posix()
@@ -1681,7 +1686,7 @@ def run_all(path,aggregators,city_names,study_name, db_path=None):
         financial_study_instance = financial_study(path,aggregators,demographic_queries_instance)
         pbar.update(1)
         tqdm.write("Running t-test queries.")
-       # ttest_queries_instance = ttest_queries(path,aggregators)
+        ttest_queries_instance = ttest_queries(path,aggregators)
         pbar.update(1)
 
 
@@ -1712,11 +1717,11 @@ def run_all(path,aggregators,city_names,study_name, db_path=None):
             "demo_financial_case_data_df":financial_study_instance.demo_financial_case_data_df,
             "mode_dist_combo":mode_queries.mode_dist_combo,
             "mode_cnt_combo":mode_queries.mode_cnt_combo,
-          #  "discount_perc_unit_fix":ttest_queries_instance.discount_perc_unit_fix,
-            #"pooling_rate_unit_fix":ttest_queries_instance.pooling_rate_unit_fix,
-            #"evmt_unit_fix":ttest_queries_instance.evmt_unit_fix,
-            #"rejected_request_rate_unit_fix":ttest_queries_instance.rejected_request_rate_unit_fix,
-           # "tnc_ttests_w_significance":ttest_queries_instance.tnc_ttests_clean_df
+            "discount_perc_unit_fix":ttest_queries_instance.discount_perc_unit_fix,
+            "pooling_rate_unit_fix":ttest_queries_instance.pooling_rate_unit_fix,
+            "evmt_unit_fix":ttest_queries_instance.evmt_unit_fix,
+            "rejected_request_rate_unit_fix":ttest_queries_instance.rejected_request_rate_unit_fix,
+            "tnc_ttests_w_significance":ttest_queries_instance.tnc_ttests_clean_df
             }
         copy_pbix_to_dir(path,study_name)
         pbar.update(1)
